@@ -4,6 +4,7 @@ use crate::bootstrap::server::AppServer;
 
 pub mod bootstrap;
 pub mod config;
+pub mod domain;
 pub mod router;
 
 #[tokio::main]
