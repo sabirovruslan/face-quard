@@ -2,7 +2,7 @@
 name = "face-guard-ml"
 version = "0.1.0"
 edition.workspace = true
-rust-vertion.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true

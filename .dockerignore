@@ -1,0 +1,14 @@
+target
+.git
+.gitignore
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+
+models/*
+!models/.gitkeep
+
+crates/*/target
