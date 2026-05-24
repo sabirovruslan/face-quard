@@ -6,6 +6,7 @@ pub mod bootstrap;
 pub mod config;
 pub mod domain;
 pub mod router;
+pub mod storage;
 
 #[tokio::main]
 async fn main() -> Result<()> {

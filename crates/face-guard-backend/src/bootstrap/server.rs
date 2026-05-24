@@ -3,17 +3,30 @@ use std::sync::Arc;
 use anyhow::Result;
 use sqlx::PgPool;
 
-use crate::{config::AppConfig, router::create_router};
+use crate::{
+    config::AppConfig,
+    router::create_router,
+    storage::{ObjectStorage, s3::S3ObjectStorage},
+};
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
     pub db_pool: Arc<PgPool>,
+    pub s3_storage: Arc<dyn ObjectStorage>,
 }
 
 impl AppState {
-    pub fn new(config: Arc<AppConfig>, db_pool: Arc<PgPool>) -> Self {
-        Self { config, db_pool }
+    pub fn new(config: Arc<AppConfig>, db_pool: Arc<PgPool>) -> Result<Self> {
+        let s3_stogare = S3ObjectStorage::new(&config.storage)?;
+
+        Ok({
+            Self {
+                config,
+                db_pool,
+                s3_storage: Arc::new(s3_stogare),
+            }
+        })
     }
 }
 
@@ -30,7 +43,7 @@ impl AppServer {
 
         config.server.port = address.port();
 
-        let state = AppState::new(Arc::new(config), Arc::new(db_pool));
+        let state = AppState::new(Arc::new(config), Arc::new(db_pool))?;
 
         Ok(Self { state, tcp })
     }

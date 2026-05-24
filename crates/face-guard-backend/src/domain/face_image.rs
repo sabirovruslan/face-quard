@@ -35,6 +35,7 @@ impl fmt::Display for FaceImageId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaceImageStatus {
     Uploaded,
+    Processing,
     Processed,
     Failed,
 }
@@ -43,6 +44,7 @@ impl FaceImageStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Uploaded => "uploaded",
+            Self::Processing => "processing",
             Self::Processed => "processed",
             Self::Failed => "failed",
         }
@@ -55,6 +57,7 @@ impl TryFrom<&str> for FaceImageStatus {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             "uploaded" => Ok(Self::Uploaded),
+            "processing" => Ok(Self::Processing),
             "processed" => Ok(Self::Processed),
             "failed" => Ok(Self::Failed),
             _ => anyhow::bail!("unknown face image status: {value}"),
