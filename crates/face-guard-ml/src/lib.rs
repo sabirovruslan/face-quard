@@ -65,14 +65,14 @@ pub struct GeneratedFaceEmbedding {
 }
 
 #[derive(Debug)]
-pub struct FaceEmbeddingService {
+pub struct FaceEmbedding {
     model: EmbeddingModel,
     session: Session,
     input_name: String,
     output_name: String,
 }
 
-impl FaceEmbeddingService {
+impl FaceEmbedding {
     pub fn new(model_config: &ModelsConfig) -> Result<Self> {
         let model = EmbeddingModel {
             name: model_config.face_model_name.clone(),
@@ -237,8 +237,8 @@ mod tests {
         Ok(model.into_session(&builder)?)
     }
 
-    fn identity_service(expected_dimension: usize) -> Result<FaceEmbeddingService> {
-        FaceEmbeddingService::from_session(
+    fn identity_service(expected_dimension: usize) -> Result<FaceEmbedding> {
+        FaceEmbedding::from_session(
             EmbeddingModel {
                 name: "test-face-model".to_string(),
                 version: "test-version".to_string(),
@@ -311,7 +311,7 @@ mod tests {
         let mut config = model_config("/tmp/model.onnx");
         config.face_model_dimension = 0;
 
-        let error = FaceEmbeddingService::new(&config).unwrap_err();
+        let error = FaceEmbedding::new(&config).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn face_embedding_service_new_rejects_empty_model_path() {
-        let error = FaceEmbeddingService::new(&model_config("   ")).unwrap_err();
+        let error = FaceEmbedding::new(&model_config("   ")).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -337,7 +337,7 @@ mod tests {
         ));
         let config = model_config(missing_path.display().to_string());
 
-        let error = FaceEmbeddingService::new(&config).unwrap_err();
+        let error = FaceEmbedding::new(&config).unwrap_err();
 
         assert!(
             error
