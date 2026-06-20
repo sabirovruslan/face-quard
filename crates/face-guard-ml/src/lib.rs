@@ -101,6 +101,10 @@ impl FaceEmbeddingService {
                 )
             })?;
 
+        Self::from_session(model, session)
+    }
+
+    fn from_session(model: EmbeddingModel, session: Session) -> Result<Self> {
         let input_name = session
             .inputs()
             .first()
@@ -186,6 +190,81 @@ impl FaceEmbeddingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    use ::image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    use ort::{
+        editor::{Graph, Model, Node, ONNX_DOMAIN, Opset},
+        session::builder::SessionBuilder,
+        value::{Outlet, Shape, SymbolicDimensions, TensorElementType, ValueType},
+    };
+
+    const FACE_EMBEDDING_DIMENSION: usize = 3 * 112 * 112;
+    const EPSILON: f32 = 1e-4;
+
+    fn model_config(path: impl Into<String>) -> ModelsConfig {
+        ModelsConfig {
+            face_embedding_model_path: path.into(),
+            face_model_name: "test-face-model".to_string(),
+            face_model_version: "test-version".to_string(),
+            face_model_dimension: FACE_EMBEDDING_DIMENSION,
+        }
+    }
+
+    fn identity_session() -> Result<Session> {
+        let tensor_type = ValueType::Tensor {
+            ty: TensorElementType::Float32,
+            shape: Shape::new([1, 3, 112, 112]),
+            dimension_symbols: SymbolicDimensions::empty(4),
+        };
+
+        let mut graph = Graph::new()?;
+        graph.set_inputs([Outlet::new("image", tensor_type.clone())])?;
+        graph.set_outputs([Outlet::new("embedding", tensor_type)])?;
+        graph.add_node(Node::new(
+            "Identity",
+            ONNX_DOMAIN,
+            "identity",
+            ["image"],
+            ["embedding"],
+            [],
+        )?)?;
+
+        let mut model = Model::new([Opset::new(ONNX_DOMAIN, 22)?])?;
+        model.add_graph(graph)?;
+
+        let builder = SessionBuilder::new()?;
+        Ok(model.into_session(&builder)?)
+    }
+
+    fn identity_service(expected_dimension: usize) -> Result<FaceEmbeddingService> {
+        FaceEmbeddingService::from_session(
+            EmbeddingModel {
+                name: "test-face-model".to_string(),
+                version: "test-version".to_string(),
+                dimension: expected_dimension,
+            },
+            identity_session()?,
+        )
+    }
+
+    fn encode_png(pixel: Rgba<u8>) -> Vec<u8> {
+        let image = ImageBuffer::from_pixel(1, 1, pixel);
+        let mut bytes = Cursor::new(Vec::new());
+
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
+
+        bytes.into_inner()
+    }
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= EPSILON,
+            "expected {actual} to be close to {expected}"
+        );
+    }
 
     #[test]
     fn new_accepts_values_with_expected_dimension() {
@@ -225,5 +304,106 @@ mod tests {
                 "embedding vector contains NaN or infinity"
             );
         }
+    }
+
+    #[test]
+    fn face_embedding_service_new_rejects_zero_model_dimension() {
+        let mut config = model_config("/tmp/model.onnx");
+        config.face_model_dimension = 0;
+
+        let error = FaceEmbeddingService::new(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "face model dimension must be greater than 0"
+        );
+    }
+
+    #[test]
+    fn face_embedding_service_new_rejects_empty_model_path() {
+        let error = FaceEmbeddingService::new(&model_config("   ")).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "face embedding model path cannot be empty"
+        );
+    }
+
+    #[test]
+    fn face_embedding_service_new_wraps_model_load_errors() {
+        let missing_path = std::env::temp_dir().join(format!(
+            "face-guard-missing-model-{}.onnx",
+            std::process::id()
+        ));
+        let config = model_config(missing_path.display().to_string());
+
+        let error = FaceEmbeddingService::new(&config).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("failed to load face embedding ONNX model from ")
+        );
+    }
+
+    #[test]
+    fn face_embedding_service_from_session_stores_model_and_io_names() {
+        let service = identity_service(FACE_EMBEDDING_DIMENSION).unwrap();
+
+        assert_eq!(service.model.name, "test-face-model");
+        assert_eq!(service.model.version, "test-version");
+        assert_eq!(service.model.dimension, FACE_EMBEDDING_DIMENSION);
+        assert_eq!(service.input_name, "image");
+        assert_eq!(service.output_name, "embedding");
+    }
+
+    #[test]
+    fn generate_embedding_rejects_empty_image_bytes() {
+        let mut service = identity_service(FACE_EMBEDDING_DIMENSION).unwrap();
+
+        let error = service.generate_embedding(&[]).unwrap_err();
+
+        assert_eq!(error.to_string(), "image bytes cannot be empty");
+    }
+
+    #[test]
+    fn generate_embedding_returns_normalized_embedding() {
+        let mut service = identity_service(FACE_EMBEDDING_DIMENSION).unwrap();
+        let image_bytes = encode_png(Rgba([255, 0, 127, 255]));
+
+        let generated = service.generate_embedding(&image_bytes).unwrap();
+
+        assert_eq!(generated.model.name, "test-face-model");
+        assert_eq!(generated.model.version, "test-version");
+        assert_eq!(generated.vector.dimension(), FACE_EMBEDDING_DIMENSION);
+        assert!(
+            generated
+                .vector
+                .values()
+                .iter()
+                .all(|value| value.is_finite())
+        );
+
+        let norm = generated
+            .vector
+            .values()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        assert_close(norm, 1.0);
+    }
+
+    #[test]
+    fn generate_embedding_rejects_unexpected_output_dimension() {
+        let mut service = identity_service(1).unwrap();
+        let image_bytes = encode_png(Rgba([255, 0, 127, 255]));
+
+        let error = service.generate_embedding(&image_bytes).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid embedding dimension: expected 1, got 37632"
+        );
     }
 }
