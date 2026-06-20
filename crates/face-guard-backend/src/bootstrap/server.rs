@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use face_guard_ml::FaceEmbedding;
 use sqlx::PgPool;
 
 use crate::{
@@ -14,17 +15,20 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub db_pool: PgPool,
     pub s3_storage: Arc<dyn ObjectStorage>,
+    pub face_embedding: Arc<FaceEmbedding>,
 }
 
 impl AppState {
     pub fn new(config: Arc<AppConfig>, db_pool: PgPool) -> Result<Self> {
         let s3_stogare = S3ObjectStorage::new(&config.storage)?;
+        let face_embedding = FaceEmbedding::new(&config.models)?;
 
         Ok({
             Self {
                 config,
                 db_pool,
                 s3_storage: Arc::new(s3_stogare),
+                face_embedding: Arc::new(face_embedding),
             }
         })
     }

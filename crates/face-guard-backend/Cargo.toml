@@ -28,6 +28,8 @@ object_store.workspace = true
 dotenvy.workspace = true
 config.workspace = true
 
+image.workspace = true
+
 async-trait = "0.1"
 
 face-guard-ml = { path = "../face-guard-ml" }

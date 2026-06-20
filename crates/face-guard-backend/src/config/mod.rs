@@ -2,6 +2,7 @@ use std::net::{AddrParseError, SocketAddr};
 
 use anyhow::{Context, Result};
 use common::{get_env, get_env_or_default};
+use face_guard_ml::ModelsConfig;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -31,14 +32,6 @@ impl ServerConfig {
 pub struct DatabaseConfig {
     pub url: String,
     pub max_connections: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModelsConfig {
-    pub face_embedding_model_path: String,
-    pub face_model_name: String,
-    pub face_model_version: String,
-    pub face_model_dimension: usize,
 }
 
 #[derive(Debug, Clone)]

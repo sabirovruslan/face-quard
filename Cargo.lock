@@ -961,6 +961,7 @@ dependencies = [
  "config",
  "dotenvy",
  "face-guard-ml",
+ "image",
  "object_store",
  "pgvector",
  "serde",
