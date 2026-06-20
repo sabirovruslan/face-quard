@@ -5,8 +5,11 @@ use crate::bootstrap::server::AppServer;
 pub mod bootstrap;
 pub mod config;
 pub mod domain;
+pub mod http;
+pub mod repository;
 pub mod router;
 pub mod storage;
+pub mod use_case;
 
 #[tokio::main]
 async fn main() -> Result<()> {

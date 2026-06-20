@@ -12,12 +12,12 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
-    pub db_pool: Arc<PgPool>,
+    pub db_pool: PgPool,
     pub s3_storage: Arc<dyn ObjectStorage>,
 }
 
 impl AppState {
-    pub fn new(config: Arc<AppConfig>, db_pool: Arc<PgPool>) -> Result<Self> {
+    pub fn new(config: Arc<AppConfig>, db_pool: PgPool) -> Result<Self> {
         let s3_stogare = S3ObjectStorage::new(&config.storage)?;
 
         Ok({
@@ -43,7 +43,7 @@ impl AppServer {
 
         config.server.port = address.port();
 
-        let state = AppState::new(Arc::new(config), Arc::new(db_pool))?;
+        let state = AppState::new(Arc::new(config), db_pool)?;
 
         Ok(Self { state, tcp })
     }

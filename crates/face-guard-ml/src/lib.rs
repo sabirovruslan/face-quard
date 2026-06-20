@@ -1,4 +1,5 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use ort::session::Session;
 
 #[derive(Debug, Clone)]
 pub struct ModelsConfig {
@@ -60,9 +61,10 @@ pub struct GeneratedFaceEmbedding {
     pub model: EmbeddingModel,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FaceEmbeddingService {
     model: EmbeddingModel,
+    session: Session,
 }
 
 impl FaceEmbeddingService {
@@ -81,7 +83,20 @@ impl FaceEmbeddingService {
             bail!("face embedding model path cannot be empty");
         }
 
-        Ok(Self { model })
+        let session = Session::builder()
+            .context("failed to create ONNX Runtime session builder")?
+            .with_intra_threads(2)
+            .map_err(|error| -> ort::Error { error.into() })
+            .context("failed to configure ONNX Runtime intra threads")?
+            .commit_from_file(&model_config.face_embedding_model_path)
+            .with_context(|| {
+                format!(
+                    "failed to load face embedding ONNX model from {}",
+                    model_config.face_embedding_model_path
+                )
+            })?;
+
+        Ok(Self { model, session })
     }
 
     pub fn generate_embedding(&self) -> Result<GeneratedFaceEmbedding> {

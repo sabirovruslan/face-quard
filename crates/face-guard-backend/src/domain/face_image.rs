@@ -1,4 +1,4 @@
-use anyhow::Ok;
+use anyhow::{Ok, Result};
 use chrono::{DateTime, Utc};
 use std::fmt;
 use uuid::Uuid;
@@ -65,11 +65,92 @@ impl TryFrom<&str> for FaceImageStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CollectionSlug(String);
+
+impl CollectionSlug {
+    const MAX_LEN: usize = 128;
+
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        let value = value.trim().to_string();
+
+        Self::validate(&value)?;
+
+        Ok(Self(value))
+    }
+
+    pub fn default_collection() -> Self {
+        Self("default".to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    fn validate(value: &str) -> Result<()> {
+        if value.is_empty() {
+            anyhow::bail!("collection slug cannot be empty");
+        };
+
+        if value.len() > Self::MAX_LEN {
+            anyhow::bail!(
+                "collection slug cannot be longer than {} characters",
+                Self::MAX_LEN
+            );
+        };
+
+        let is_valid = value
+            .chars()
+            .all(|c| c.is_ascii_alphabetic() || c.is_ascii_digit() || c == '-' || c == '_');
+
+        if !is_valid {
+            anyhow::bail!(
+                "collection slug can contain only ascii alphabetic letters, digits, '-' and '_'"
+            );
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for CollectionSlug {
+    fn default() -> Self {
+        Self::default_collection()
+    }
+}
+
+impl fmt::Display for CollectionSlug {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl TryFrom<String> for CollectionSlug {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for CollectionSlug {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FaceImage {
     pub id: FaceImageId,
     pub image_key: String,
-    pub collection_slug: String,
+    pub collection_slug: CollectionSlug,
     pub status: FaceImageStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
