@@ -6,7 +6,7 @@ CREATE TABLE face_embeddings (
 
     face_image_id UUID NOT NULL REFERENCES face_images(id) ON DELETE CASCADE,
 
-    embedding vector NOT NULL,
+    embedding vector(512) NOT NULL,
 
     model_name TEXT NOT NULL,
     model_version TEXT NOT NULL,
@@ -15,8 +15,8 @@ CREATE TABLE face_embeddings (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT face_embeddings_model_dimension_check CHECK (
-        model_dimension > 0
-    ),
+        model_dimension = 512
+    )
 );
 
 CREATE INDEX face_embeddings_face_image_id_idx

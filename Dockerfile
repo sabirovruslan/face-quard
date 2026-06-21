@@ -1,10 +1,11 @@
-FROM rust:1.95-slim-bookworm AS builder
+FROM rust:1.95-slim-trixie AS builder
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     ca-certificates \
+    g++ \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,13 +16,14 @@ COPY migrations ./migrations
 RUN cargo build --release -p face-guard-backend
 
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libgcc-s1 \
+    libstdc++6 \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 

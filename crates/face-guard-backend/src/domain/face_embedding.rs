@@ -38,7 +38,7 @@ impl fmt::Display for FaceEmbeddingId {
 pub struct FaceEmbedding {
     pub id: FaceEmbeddingId,
     pub face_image_id: FaceImageId,
-    pub values: Vec<f32>,
+    pub embedding: Vec<f32>,
     pub model_name: String,
     pub model_version: String,
     pub model_dimension: usize,

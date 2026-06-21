@@ -122,7 +122,7 @@ where
             .insert_embedding(NewFaceEmbedding{
                 id: face_embedding_id,
                 face_image_id,
-                values: generated_embedding.vector.into_values(),
+                embedding: generated_embedding.vector.into_values(),
                 model_name: generated_embedding.model.name,
                 model_version: generated_embedding.model.version,
                 model_dimension: generated_embedding.model.dimension
