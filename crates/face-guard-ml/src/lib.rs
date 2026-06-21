@@ -64,6 +64,10 @@ pub struct GeneratedFaceEmbedding {
     pub model: EmbeddingModel,
 }
 
+pub trait FaceEmbeddingGenerator: Send {
+    fn generate_embedding(&mut self, image_bytes: &[u8]) -> Result<GeneratedFaceEmbedding>;
+}
+
 #[derive(Debug)]
 pub struct FaceEmbedding {
     model: EmbeddingModel,
@@ -127,7 +131,25 @@ impl FaceEmbedding {
         })
     }
 
-    pub fn generate_embedding(&mut self, image_bytes: &[u8]) -> Result<GeneratedFaceEmbedding> {
+    fn validate_embedding_values(&self, values: &[f32]) -> Result<()> {
+        if values.len() != self.model.dimension {
+            bail!(
+                "invalid embedding dimension: expected {}, got {}",
+                self.model.dimension,
+                values.len()
+            );
+        }
+
+        if values.iter().any(|value| !value.is_finite()) {
+            bail!("embedding contains NaN or infinity");
+        }
+
+        Ok(())
+    }
+}
+
+impl FaceEmbeddingGenerator for FaceEmbedding {
+    fn generate_embedding(&mut self, image_bytes: &[u8]) -> Result<GeneratedFaceEmbedding> {
         if image_bytes.is_empty() {
             bail!("image bytes cannot be empty");
         }
@@ -168,22 +190,6 @@ impl FaceEmbedding {
             vector: embedding_vector,
             model: self.model.clone(),
         })
-    }
-
-    fn validate_embedding_values(&self, values: &[f32]) -> Result<()> {
-        if values.len() != self.model.dimension {
-            bail!(
-                "invalid embedding dimension: expected {}, got {}",
-                self.model.dimension,
-                values.len()
-            );
-        }
-
-        if values.iter().any(|value| !value.is_finite()) {
-            bail!("embedding contains NaN or infinity");
-        }
-
-        Ok(())
     }
 }
 

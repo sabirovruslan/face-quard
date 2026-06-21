@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
-use face_guard_ml::FaceEmbedding;
+use face_guard_ml::FaceEmbeddingGenerator;
 
 use crate::{
     domain::{CollectionSlug, FaceEmbeddingId, FaceImageId, FaceImageKey, FaceImageStatus},
@@ -37,7 +37,7 @@ where
 {
     repository: R,
     s3_storage: Arc<dyn ObjectStorage>,
-    face_embedding: Arc<Mutex<FaceEmbedding>>,
+    face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
 }
 
 impl<R> UploadFaceImageUseCase<R>
@@ -47,7 +47,7 @@ where
     pub fn new(
         repository: R,
         s3_storage: Arc<dyn ObjectStorage>,
-        face_embedding: Arc<Mutex<FaceEmbedding>>,
+        face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
     ) -> Self {
         Self {
             repository,

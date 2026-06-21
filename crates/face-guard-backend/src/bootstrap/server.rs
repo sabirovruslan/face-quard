@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use face_guard_ml::FaceEmbedding;
+use face_guard_ml::{FaceEmbedding, FaceEmbeddingGenerator};
 use sqlx::PgPool;
 
 use crate::{
@@ -15,7 +15,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub db_pool: PgPool,
     pub s3_storage: Arc<dyn ObjectStorage>,
-    pub face_embedding: Arc<Mutex<FaceEmbedding>>,
+    pub face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
 }
 
 impl AppState {
