@@ -51,6 +51,7 @@ pub async fn upload_face_image(
     let use_case = UploadFaceImageUseCase::new(
         PgRepository::new(state.db_pool.clone()),
         state.s3_storage.clone(),
+        state.face_embedding.clone(),
     );
 
     let output = use_case.execute(input).await?;

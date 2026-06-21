@@ -32,6 +32,20 @@ impl fmt::Display for FaceImageId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FaceImageKey(String);
+
+impl FaceImageKey {
+    pub fn new(extension: &str) -> Self {
+        let image_key = format!("{}.{}", Uuid::new_v4(), extension);
+        Self(image_key)
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaceImageStatus {
     Uploaded,

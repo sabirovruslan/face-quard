@@ -2,14 +2,14 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 use crate::{
-    domain::{CollectionSlug, FaceImageId, FaceImageStatus},
+    domain::{CollectionSlug, FaceImageId, FaceImageKey, FaceImageStatus},
     repository::PgRepository,
 };
 
 #[derive(Debug, Clone)]
 pub struct NewFaceImage {
     pub id: FaceImageId,
-    pub image_key: String,
+    pub image_key: FaceImageKey,
     pub collection_slug: CollectionSlug,
     pub status: FaceImageStatus,
 }
@@ -17,7 +17,7 @@ pub struct NewFaceImage {
 #[async_trait]
 pub trait FaceImageRepository: Send + Sync {
     async fn insert_face_image(&self, image: NewFaceImage) -> Result<()>;
-    async fn mark_face_image_processing(&self, id: FaceImageId) -> Result<()>;
+    async fn mark_face_image_processed(&self, id: FaceImageId) -> Result<()>;
     async fn mark_face_image_failed(&self, id: FaceImageId) -> Result<()>;
 }
 
@@ -36,7 +36,7 @@ impl FaceImageRepository for PgRepository {
             "#,
         )
         .bind(image.id.as_uuid())
-        .bind(&image.image_key)
+        .bind(image.image_key.as_str())
         .bind(image.collection_slug.as_str())
         .bind(image.status.as_str())
         .execute(&self.db_pool)
@@ -44,13 +44,14 @@ impl FaceImageRepository for PgRepository {
         .with_context(|| {
             format!(
                 "failed to insert face image: face_image_id={}, image_key={}",
-                image.id, image.image_key
+                image.id,
+                image.image_key.as_str()
             )
         })?;
         Ok(())
     }
 
-    async fn mark_face_image_processing(&self, id: FaceImageId) -> Result<()> {
+    async fn mark_face_image_processed(&self, id: FaceImageId) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE face_images
@@ -61,10 +62,10 @@ impl FaceImageRepository for PgRepository {
             "#,
         )
         .bind(id.as_uuid())
-        .bind(FaceImageStatus::Processing.as_str())
+        .bind(FaceImageStatus::Processed.as_str())
         .execute(&self.db_pool)
         .await
-        .with_context(|| format!("failed to mark face image as processing: face_image_id={id}"))?;
+        .with_context(|| format!("failed to mark face image as processed: face_image_id={id}"))?;
 
         Ok(())
     }

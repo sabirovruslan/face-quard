@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use face_guard_ml::FaceEmbedding;
@@ -15,7 +15,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub db_pool: PgPool,
     pub s3_storage: Arc<dyn ObjectStorage>,
-    pub face_embedding: Arc<FaceEmbedding>,
+    pub face_embedding: Arc<Mutex<FaceEmbedding>>,
 }
 
 impl AppState {
@@ -28,7 +28,7 @@ impl AppState {
                 config,
                 db_pool,
                 s3_storage: Arc::new(s3_stogare),
-                face_embedding: Arc::new(face_embedding),
+                face_embedding: Arc::new(Mutex::new(face_embedding)),
             }
         })
     }

@@ -1,3 +1,4 @@
+pub mod face_embedding;
 pub mod face_image;
 
 use sqlx::PgPool;
