@@ -7,7 +7,7 @@ use axum::{
 use crate::{
     bootstrap::server::AppState,
     domain::CollectionSlug,
-    http::dto::face_images::response::UploadFaceImageResponse,
+    http::{dto::face_images::response::UploadFaceImageResponse, error::AppHttpError},
     repository::PgRepository,
     use_case::upload_face_image::{UploadFaceImageInput, UploadFaceImageUseCase},
 };
@@ -15,7 +15,7 @@ use crate::{
 pub async fn upload_face_image(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> Result<Json<UploadFaceImageResponse>> {
+) -> Result<Json<UploadFaceImageResponse>, AppHttpError> {
     let mut collection_slug: Option<String> = None;
     let mut file_name: Option<String> = None;
     let mut content_type: Option<String> = None;
