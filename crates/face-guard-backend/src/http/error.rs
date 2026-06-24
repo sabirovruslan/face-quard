@@ -1,3 +1,5 @@
+use std::num::{ParseFloatError, ParseIntError};
+
 use axum::{extract::multipart::MultipartError, http::StatusCode, response::IntoResponse};
 
 pub struct AppHttpError(anyhow::Error);
@@ -16,6 +18,18 @@ impl From<anyhow::Error> for AppHttpError {
 
 impl From<MultipartError> for AppHttpError {
     fn from(value: MultipartError) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<ParseFloatError> for AppHttpError {
+    fn from(value: ParseFloatError) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<ParseIntError> for AppHttpError {
+    fn from(value: ParseIntError) -> Self {
         Self(value.into())
     }
 }
