@@ -10,6 +10,7 @@ pub mod repository;
 pub mod router;
 pub mod storage;
 pub mod use_case;
+pub mod validation;
 
 #[tokio::main]
 async fn main() -> Result<()> {

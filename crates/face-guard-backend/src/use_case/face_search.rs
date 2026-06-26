@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use face_guard_ml::FaceEmbeddingGenerator;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
     http::error::AppHttpError,
     repository::face_embedding::{FaceEmbeddingRepository, SimilarFaceEmbedding},
     storage::ObjectStorage,
-    use_case::image_validation::{validate_image_bytes, validate_upload_input},
+    validation::{validate_image_bytes, validate_upload_input},
 };
 
 #[derive(Debug)]

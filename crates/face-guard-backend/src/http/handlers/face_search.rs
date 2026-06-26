@@ -4,7 +4,7 @@ use axum::{Json, extract::State};
 use crate::{
     bootstrap::server::AppState,
     http::{
-        dto::face_search::{request::SearchFaceRequest, response::SearchFaceResponse},
+        dto::{request::SearchFaceRequest, response::SearchFaceResponse},
         error::AppHttpError,
     },
     repository::PgRepository,

@@ -57,3 +57,22 @@ impl SearchFaceRequest {
         Ok(())
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct CreateFaceImageRequest {
+    pub image_key: String,
+    pub collection_slug: Option<String>,
+}
+
+impl CreateFaceImageRequest {
+    pub fn image_key(&self) -> Result<FaceImageKey> {
+        FaceImageKey::from_existing(&self.image_key)
+    }
+
+    pub fn collection_slug(&self) -> Result<CollectionSlug> {
+        match &self.collection_slug {
+            Some(value) => CollectionSlug::new(value),
+            None => Ok(CollectionSlug::default_collection()),
+        }
+    }
+}
