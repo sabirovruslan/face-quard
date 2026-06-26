@@ -2,13 +2,13 @@ use std::net::{AddrParseError, SocketAddr};
 
 use anyhow::{Context, Result};
 use common::{get_env, get_env_or_default};
-use face_guard_ml::ModelsConfig;
+use face_guard_ml::EmbeddingModelsConfig;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    pub models: ModelsConfig,
+    pub models: EmbeddingModelsConfig,
     pub storage: StorageConfig,
 }
 
@@ -64,11 +64,11 @@ impl AppConfig {
             access_key_id: get_env("S3_ACCESS_KEY_ID")?,
             secret_access_key: get_env("S3_SECRET_ACCESS_KEY")?,
         };
-        let models = ModelsConfig {
-            face_embedding_model_path: get_env("FACE_EMBEDDING_MODEL_PATH")?,
-            face_model_name: get_env_or_default("FACE_MODEL_NAME", "insightface-buffalo-l"),
-            face_model_version: get_env_or_default("FACE_MODEL_VERSION", "w600k-r50"),
-            face_model_dimension: get_env_or_default("FACE_MODEL_DIMENSION", "512")
+        let models = EmbeddingModelsConfig {
+            path: get_env("FACE_EMBEDDING_MODEL_PATH")?,
+            name: get_env_or_default("FACE_EMBEDDING_MODEL_NAME", "insightface-buffalo-l"),
+            version: get_env_or_default("FACE_EMBEDDING_MODEL_PATH_MODEL_VERSION", "w600k-r50"),
+            dimension: get_env_or_default("FACE_EMBEDDING_MODEL_DIMENSION", "512")
                 .parse()
                 .context("FACE_MODEL_DIMENSION must be a valid usize")?,
         };
