@@ -42,18 +42,23 @@ impl TryFrom<SimilarFaceEmbeddingRow> for SimilarFaceEmbedding {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SearchSimilarFacesQuery {
+    pub collection_slug: CollectionSlug,
+    pub embedding: Vec<f32>,
+    pub model_name: String,
+    pub model_version: String,
+    pub model_dimension: usize,
+    pub max_faces: usize,
+    pub similarity_threshold: f32,
+}
+
 #[async_trait]
 pub trait FaceEmbeddingRepository {
     async fn insert_embedding(&self, embedding: NewFaceEmbedding) -> Result<()>;
     async fn search_similar_faces(
         &self,
-        collection_slug: &CollectionSlug,
-        embedding: Vec<f32>,
-        model_name: &str,
-        model_version: &str,
-        model_dimension: usize,
-        max_faces: usize,
-        similarity_threshold: f32,
+        query: SearchSimilarFacesQuery,
     ) -> Result<Vec<SimilarFaceEmbedding>>;
 }
 
@@ -93,13 +98,7 @@ impl FaceEmbeddingRepository for PgRepository {
 
     async fn search_similar_faces(
         &self,
-        collection_slug: &CollectionSlug,
-        embedding: Vec<f32>,
-        model_name: &str,
-        model_version: &str,
-        model_dimension: usize,
-        max_faces: usize,
-        similarity_threshold: f32,
+        query: SearchSimilarFacesQuery,
     ) -> Result<Vec<SimilarFaceEmbedding>> {
         let rows = sqlx::query_as::<_, SimilarFaceEmbeddingRow>(
             r#"
@@ -120,13 +119,13 @@ impl FaceEmbeddingRepository for PgRepository {
                 LIMIT $7
             "#,
         )
-        .bind(embedding)
-        .bind(collection_slug.as_str())
-        .bind(model_name)
-        .bind(model_version)
-        .bind(model_dimension as i32)
-        .bind(similarity_threshold as f64)
-        .bind(max_faces as i64)
+        .bind(query.embedding)
+        .bind(query.collection_slug.as_str())
+        .bind(query.model_name.as_str())
+        .bind(query.model_version.as_str())
+        .bind(query.model_dimension as i32)
+        .bind(query.similarity_threshold as f64)
+        .bind(query.max_faces as i64)
         .fetch_all(&self.db_pool)
         .await
         .context("failed to search similar face embeddings")?;

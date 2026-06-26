@@ -6,7 +6,9 @@ use face_guard_ml::FaceEmbeddingGenerator;
 use crate::{
     domain::{CollectionSlug, FaceImageId, FaceImageKey},
     http::error::AppHttpError,
-    repository::face_embedding::{FaceEmbeddingRepository, SimilarFaceEmbedding},
+    repository::face_embedding::{
+        FaceEmbeddingRepository, SearchSimilarFacesQuery, SimilarFaceEmbedding,
+    },
     storage::ObjectStorage,
     validation::{validate_image_bytes, validate_upload_input},
 };
@@ -96,15 +98,15 @@ where
 
         let matches = self
             .repository
-            .search_similar_faces(
-                &input.collection_slug,
-                generated_embedding.vector.into_values(),
-                &generated_embedding.model.name,
-                &generated_embedding.model.version,
-                generated_embedding.model.dimension,
-                input.max_faces,
-                input.similarity_threshold,
-            )
+            .search_similar_faces(SearchSimilarFacesQuery {
+                collection_slug: input.collection_slug.clone(),
+                embedding: generated_embedding.vector.into_values(),
+                model_name: generated_embedding.model.name,
+                model_version: generated_embedding.model.version,
+                model_dimension: generated_embedding.model.dimension,
+                max_faces: input.max_faces,
+                similarity_threshold: input.similarity_threshold,
+            })
             .await
             .context("failed to search similar faces")?;
 

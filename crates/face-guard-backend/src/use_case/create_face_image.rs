@@ -145,17 +145,18 @@ mod tests {
     use face_guard_ml::{EmbeddingModel, EmbeddingVector, GeneratedFaceEmbedding};
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 
+    const TEST_IMAGE_KEY: &str = "faces/test.png";
+
     #[derive(Debug, Clone)]
-    struct UploadedObject {
+    struct StoredObject {
         key: String,
-        content_type: String,
         bytes: Vec<u8>,
     }
 
     #[derive(Debug, Default)]
     struct FakeStorageState {
-        uploaded_objects: Vec<UploadedObject>,
-        put_object_error: Option<String>,
+        objects: Vec<StoredObject>,
+        get_object_error: Option<String>,
     }
 
     #[derive(Debug, Default)]
@@ -167,33 +168,44 @@ mod tests {
         fn failing(error: impl Into<String>) -> Self {
             Self {
                 state: Mutex::new(FakeStorageState {
-                    uploaded_objects: Vec::new(),
-                    put_object_error: Some(error.into()),
+                    objects: Vec::new(),
+                    get_object_error: Some(error.into()),
                 }),
             }
         }
 
-        fn uploaded_objects(&self) -> Vec<UploadedObject> {
-            self.state.lock().unwrap().uploaded_objects.clone()
+        fn with_object(key: impl Into<String>, bytes: Vec<u8>) -> Self {
+            Self {
+                state: Mutex::new(FakeStorageState {
+                    objects: vec![StoredObject {
+                        key: key.into(),
+                        bytes,
+                    }],
+                    get_object_error: None,
+                }),
+            }
         }
     }
 
     #[async_trait]
     impl ObjectStorage for FakeObjectStorage {
-        async fn put_object(&self, key: &str, content_type: &str, bytes: Vec<u8>) -> Result<()> {
-            let mut state = self.state.lock().unwrap();
+        async fn put_object(&self, _key: &str, _content_type: &str, _bytes: Vec<u8>) -> Result<()> {
+            Ok(())
+        }
 
-            if let Some(error) = &state.put_object_error {
+        async fn get_object(&self, key: &str) -> Result<Vec<u8>> {
+            let state = self.state.lock().unwrap();
+
+            if let Some(error) = &state.get_object_error {
                 anyhow::bail!(error.clone());
             }
 
-            state.uploaded_objects.push(UploadedObject {
-                key: key.to_string(),
-                content_type: content_type.to_string(),
-                bytes,
-            });
-
-            Ok(())
+            state
+                .objects
+                .iter()
+                .find(|object| object.key == key)
+                .map(|object| object.bytes.clone())
+                .ok_or_else(|| anyhow::anyhow!("object not found: {key}"))
         }
     }
 
@@ -239,6 +251,13 @@ mod tests {
         async fn insert_embedding(&self, embedding: NewFaceEmbedding) -> Result<()> {
             self.state.lock().unwrap().embeddings.push(embedding);
             Ok(())
+        }
+
+        async fn search_similar_faces(
+            &self,
+            _query: crate::repository::face_embedding::SearchSimilarFacesQuery,
+        ) -> Result<Vec<crate::repository::face_embedding::SimilarFaceEmbedding>> {
+            Ok(Vec::new())
         }
     }
 
@@ -299,12 +318,10 @@ mod tests {
         bytes.into_inner()
     }
 
-    fn upload_input(bytes: Vec<u8>) -> CreateFaceImageInput {
+    fn create_input() -> CreateFaceImageInput {
         CreateFaceImageInput {
             collection_slug: CollectionSlug::new("test_collection").unwrap(),
-            original_file_name: Some("face.png".to_string()),
-            content_type: "image/png".to_string(),
-            bytes,
+            image_key: FaceImageKey::from_existing(TEST_IMAGE_KEY).unwrap(),
         }
     }
 
@@ -320,28 +337,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_uploads_image_generates_embedding_and_marks_image_processed() {
+    async fn execute_downloads_image_generates_embedding_and_marks_image_processed() {
         let repository = FakeRepository::default();
-        let storage = Arc::new(FakeObjectStorage::default());
         let input_bytes = valid_png_bytes();
+        let storage = Arc::new(FakeObjectStorage::with_object(
+            TEST_IMAGE_KEY,
+            input_bytes.clone(),
+        ));
         let use_case = build_use_case(
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::success(),
         );
 
-        let output = use_case
-            .execute(upload_input(input_bytes.clone()))
-            .await
-            .unwrap();
+        let output = use_case.execute(create_input()).await.unwrap();
 
         assert_eq!(output.status, FaceImageStatus::Processed);
-
-        let uploaded_objects = storage.uploaded_objects();
-        assert_eq!(uploaded_objects.len(), 1);
-        assert_eq!(uploaded_objects[0].key, output.image_key.as_str());
-        assert_eq!(uploaded_objects[0].content_type, "image/png");
-        assert_eq!(uploaded_objects[0].bytes, input_bytes);
+        assert_eq!(output.image_key.as_str(), TEST_IMAGE_KEY);
 
         let state = repository.state();
         assert_eq!(state.face_images.len(), 1);
@@ -366,20 +378,19 @@ mod tests {
     #[tokio::test]
     async fn execute_rejects_invalid_image_before_side_effects() {
         let repository = FakeRepository::default();
-        let storage = Arc::new(FakeObjectStorage::default());
+        let storage = Arc::new(FakeObjectStorage::with_object(
+            TEST_IMAGE_KEY,
+            b"not an image".to_vec(),
+        ));
         let use_case = build_use_case(
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::success(),
         );
 
-        let error = use_case
-            .execute(upload_input(b"not an image".to_vec()))
-            .await
-            .unwrap_err();
+        let error = use_case.execute(create_input()).await.unwrap_err();
 
         assert_eq!(error.to_string(), "invalid image");
-        assert!(storage.uploaded_objects().is_empty());
 
         let state = repository.state();
         assert!(state.face_images.is_empty());
@@ -398,14 +409,11 @@ mod tests {
             FakeEmbeddingGenerator::success(),
         );
 
-        let error = use_case
-            .execute(upload_input(valid_png_bytes()))
-            .await
-            .unwrap_err();
+        let error = use_case.execute(create_input()).await.unwrap_err();
 
         assert_eq!(
             error.to_string(),
-            "failed to upload face image to object storage"
+            "failed to download face image from object storage"
         );
 
         let state = repository.state();
@@ -418,20 +426,19 @@ mod tests {
     #[tokio::test]
     async fn execute_marks_image_failed_when_embedding_generation_fails() {
         let repository = FakeRepository::default();
-        let storage = Arc::new(FakeObjectStorage::default());
+        let storage = Arc::new(FakeObjectStorage::with_object(
+            TEST_IMAGE_KEY,
+            valid_png_bytes(),
+        ));
         let use_case = build_use_case(
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::failing("embedding service failed"),
         );
 
-        let error = use_case
-            .execute(upload_input(valid_png_bytes()))
-            .await
-            .unwrap_err();
+        let error = use_case.execute(create_input()).await.unwrap_err();
 
         assert_eq!(error.to_string(), "failed to generate face embedding");
-        assert_eq!(storage.uploaded_objects().len(), 1);
 
         let state = repository.state();
         assert_eq!(state.face_images.len(), 1);
