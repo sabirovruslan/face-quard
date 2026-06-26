@@ -3,7 +3,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use object_store::{
-    Attribute, Attributes, ObjectStore, PutMode, PutOptions, aws::AmazonS3Builder, path::Path,
+    Attribute, Attributes, ObjectStore, ObjectStoreExt, PutMode, PutOptions, aws::AmazonS3Builder,
+    path::Path,
 };
 
 use crate::{config::StorageConfig, storage::ObjectStorage};
@@ -53,5 +54,18 @@ impl ObjectStorage for S3ObjectStorage {
             .with_context(|| format!("failed to put object to S3 with key '{}'", key))?;
 
         Ok(())
+    }
+
+    async fn get_object(&self, key: &str) -> Result<Vec<u8>> {
+        let bytes = self
+            .store
+            .get(&Path::from(key))
+            .await
+            .with_context(|| format!("failed to get object from S3 with key '{}'", key))?
+            .bytes()
+            .await
+            .with_context(|| format!("failed to read object bytes from S3 with key '{}'", key))?;
+
+        Ok(bytes.to_vec())
     }
 }

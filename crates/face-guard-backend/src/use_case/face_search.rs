@@ -6,7 +6,7 @@ use face_guard_ml::FaceEmbeddingGenerator;
 use crate::{
     domain::{CollectionSlug, FaceImageId, FaceImageKey},
     http::error::AppHttpError,
-    repository::face_embedding::FaceEmbeddingRepository,
+    repository::face_embedding::{FaceEmbeddingRepository, SimilarFaceEmbedding},
     storage::ObjectStorage,
     use_case::image_validation::{validate_image_bytes, validate_upload_input},
 };
@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug)]
 pub struct SearchSimilarFaceInput {
     pub collection_slug: CollectionSlug,
-    pub bytes: Vec<u8>,
+    pub image_key: FaceImageKey,
     pub max_faces: usize,
     pub similarity_threshold: f32,
 }
@@ -22,7 +22,7 @@ pub struct SearchSimilarFaceInput {
 #[derive(Debug)]
 pub struct SearchSimilarFaceOutput {
     pub collection_slug: CollectionSlug,
-    pub matches: Vec<SearchSimilarFaceOutput>,
+    pub matches: Vec<SearchSimilarFaceMatch>,
 }
 
 #[derive(Debug)]
@@ -30,6 +30,16 @@ pub struct SearchSimilarFaceMatch {
     pub face_image_id: FaceImageId,
     pub image_key: FaceImageKey,
     pub similarity: f32,
+}
+
+impl From<SimilarFaceEmbedding> for SearchSimilarFaceMatch {
+    fn from(value: SimilarFaceEmbedding) -> Self {
+        Self {
+            face_image_id: value.face_image_id,
+            image_key: value.image_key,
+            similarity: value.similarity,
+        }
+    }
 }
 
 pub struct SearchSimilarFaceUseCase<R>
@@ -61,11 +71,17 @@ where
         &self,
         input: SearchSimilarFaceInput,
     ) -> Result<SearchSimilarFaceOutput, AppHttpError> {
-        validate_upload_input(&input.bytes)?;
-        validate_image_bytes(&input.bytes)?;
+        let bytes = self
+            .s3_storage
+            .get_object(input.image_key.as_str())
+            .await
+            .context("failed to download search image from object storage")?;
+
+        validate_upload_input(&bytes)?;
+        validate_image_bytes(&bytes)?;
 
         let embedding_model = self.face_embedding.clone();
-        let image_bytes = input.bytes;
+        let image_bytes = bytes;
 
         let generated_embedding = tokio::task::spawn_blocking(move || {
             let mut embedding_model = embedding_model
@@ -78,6 +94,26 @@ where
         .context("failed to join face embedding task")?
         .context("failed to generate face embedding")?;
 
-        todo!()
+        let matches = self
+            .repository
+            .search_similar_faces(
+                &input.collection_slug,
+                generated_embedding.vector.into_values(),
+                &generated_embedding.model.name,
+                &generated_embedding.model.version,
+                generated_embedding.model.dimension,
+                input.max_faces,
+                input.similarity_threshold,
+            )
+            .await
+            .context("failed to search similar faces")?;
+
+        Ok(SearchSimilarFaceOutput {
+            collection_slug: input.collection_slug,
+            matches: matches
+                .into_iter()
+                .map(SearchSimilarFaceMatch::from)
+                .collect(),
+        })
     }
 }

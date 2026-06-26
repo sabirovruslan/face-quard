@@ -1,5 +1,6 @@
-use anyhow::{Ok, Result};
+use anyhow::{Ok, Result, bail};
 use chrono::{DateTime, Utc};
+use serde_json::value;
 use std::fmt;
 use uuid::Uuid;
 
@@ -39,6 +40,17 @@ impl FaceImageKey {
     pub fn new(extension: &str) -> Self {
         let image_key = format!("{}.{}", Uuid::new_v4(), extension);
         Self(image_key)
+    }
+
+    pub fn from_existing(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        let value = value.trim().to_string();
+
+        if value.is_empty() {
+            bail!("image key cannot be empty");
+        }
+
+        Ok(Self(value))
     }
 
     pub fn as_str(&self) -> &str {

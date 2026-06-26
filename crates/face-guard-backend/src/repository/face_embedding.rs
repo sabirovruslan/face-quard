@@ -1,8 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use async_trait::async_trait;
+use uuid::Uuid;
 
 use crate::{
-    domain::{FaceEmbeddingId, FaceImageId},
+    domain::{CollectionSlug, FaceEmbeddingId, FaceImageId, FaceImageKey},
     repository::PgRepository,
 };
 
@@ -16,9 +17,44 @@ pub struct NewFaceEmbedding {
     pub model_dimension: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct SimilarFaceEmbedding {
+    pub id: FaceEmbeddingId,
+    pub face_image_id: FaceImageId,
+    pub image_key: FaceImageKey,
+    pub similarity: f32,
+}
+
+type SimilarFaceEmbeddingRow = (Uuid, Uuid, String, f32);
+
+impl TryFrom<SimilarFaceEmbeddingRow> for SimilarFaceEmbedding {
+    type Error = Error;
+
+    fn try_from(value: SimilarFaceEmbeddingRow) -> std::result::Result<Self, Self::Error> {
+        let (id, face_image_id, image_key, similarity) = value;
+
+        Ok(Self {
+            id: FaceEmbeddingId::from_uuid(id),
+            face_image_id: FaceImageId::from_uuid(face_image_id),
+            image_key: FaceImageKey::from_existing(image_key)?,
+            similarity,
+        })
+    }
+}
+
 #[async_trait]
 pub trait FaceEmbeddingRepository {
     async fn insert_embedding(&self, embedding: NewFaceEmbedding) -> Result<()>;
+    async fn search_similar_faces(
+        &self,
+        collection_slug: &CollectionSlug,
+        embedding: Vec<f32>,
+        model_name: &str,
+        model_version: &str,
+        model_dimension: usize,
+        max_faces: usize,
+        similarity_threshold: f32,
+    ) -> Result<Vec<SimilarFaceEmbedding>>;
 }
 
 #[async_trait]
@@ -53,5 +89,50 @@ impl FaceEmbeddingRepository for PgRepository {
         })?;
 
         Ok(())
+    }
+
+    async fn search_similar_faces(
+        &self,
+        collection_slug: &CollectionSlug,
+        embedding: Vec<f32>,
+        model_name: &str,
+        model_version: &str,
+        model_dimension: usize,
+        max_faces: usize,
+        similarity_threshold: f32,
+    ) -> Result<Vec<SimilarFaceEmbedding>> {
+        let rows = sqlx::query_as::<_, SimilarFaceEmbeddingRow>(
+            r#"
+                SELECT
+                    fe.id AS face_embedding_id,
+                    fi.id AS face_image_id,
+                    fi.image_key,
+                    (1.0 - (fe.embedding <=> $1::real[]::vector))::real AS similarity
+                FROM face_embeddings fe
+                JOIN face_images fi ON fi.id = fe.face_image_id
+                WHERE
+                    fi.collection_slug = $2
+                    AND fe.model_name = $3
+                    AND fe.model_version = $4
+                    AND fe.model_dimension = $5
+                    AND (1.0 - (fe.embedding <=> $1::real[]::vector)) >= $6
+                ORDER BY fe.embedding <=> $1::real[]::vector
+                LIMIT $7
+            "#,
+        )
+        .bind(embedding)
+        .bind(collection_slug.as_str())
+        .bind(model_name)
+        .bind(model_version)
+        .bind(model_dimension as i32)
+        .bind(similarity_threshold as f64)
+        .bind(max_faces as i64)
+        .fetch_all(&self.db_pool)
+        .await
+        .context("failed to search similar face embeddings")?;
+
+        rows.into_iter()
+            .map(SimilarFaceEmbedding::try_from)
+            .collect()
     }
 }
