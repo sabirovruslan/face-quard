@@ -28,6 +28,7 @@ pub async fn search_similar_face(
         PgRepository::new(state.db_pool),
         state.s3_storage.clone(),
         state.face_embedding.clone(),
+        state.face_detector.clone(),
     );
 
     let output = use_case.execute(input).await?;

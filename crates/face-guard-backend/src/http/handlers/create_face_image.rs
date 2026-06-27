@@ -24,6 +24,7 @@ pub async fn create_face_image(
         PgRepository::new(state.db_pool.clone()),
         state.s3_storage.clone(),
         state.face_embedding.clone(),
+        state.face_detector.clone(),
     );
 
     let output = use_case.execute(input).await?;

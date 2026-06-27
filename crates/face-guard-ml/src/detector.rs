@@ -3,11 +3,7 @@ use std::io::Cursor;
 use anyhow::{Context, Ok, Result, bail};
 use image::{DynamicImage, GenericImageView};
 use ndarray::Array4;
-use ort::{
-    inputs,
-    session::{self, Session},
-    value::TensorRef,
-};
+use ort::{inputs, session::Session, value::TensorRef};
 
 #[derive(Debug, Clone)]
 pub struct FaceDetectionModelConfig {
@@ -25,6 +21,10 @@ pub struct FaceCrop {
 }
 
 impl FaceCrop {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
@@ -181,7 +181,7 @@ fn preprocess_detector_image(
     input_size: u32,
 ) -> Result<(Array4<f32>, LetterboxInfo)> {
     let (src_width, src_height) = image.dimensions();
-    let scale = (input_size as f32 / src_width as f32).min((input_size as f32 / src_height as f32));
+    let scale = (input_size as f32 / src_width as f32).min(input_size as f32 / src_height as f32);
 
     let resized_width = (src_width as f32 * scale).round() as u32;
     let resized_height = (src_height as f32 * scale).round() as u32;
@@ -232,7 +232,7 @@ fn decode_scrfd_level(
 ) -> Result<Vec<FaceBox>> {
     let feature_size = input_size / stride;
     let anchors_per_cell = 2;
-    let expected_boxes = feature_size as usize * feature_size as usize + anchors_per_cell;
+    let expected_boxes = feature_size as usize * feature_size as usize * anchors_per_cell;
 
     if scores.len() < expected_boxes {
         bail!("SCRFD score output is smaller than expected");
@@ -266,8 +266,8 @@ fn decode_scrfd_level(
 
                 let x1 = (center_x - left - letterbox.pad_x) / letterbox.scale;
                 let y1 = (center_y - top - letterbox.pad_y) / letterbox.scale;
-                let x2 = (center_x - right - letterbox.pad_x) / letterbox.scale;
-                let y2 = (center_y - bottom - letterbox.pad_y) / letterbox.scale;
+                let x2 = (center_x + right - letterbox.pad_x) / letterbox.scale;
+                let y2 = (center_y + bottom - letterbox.pad_y) / letterbox.scale;
 
                 let width = x2 - x1;
                 let height = y2 - y1;
@@ -336,7 +336,7 @@ fn crop_face_to_png(image: &DynamicImage, face: FaceBox, margin: f32) -> Result<
     let (image_width, image_height) = image.dimensions();
 
     let margin_x = face.width * margin;
-    let margin_y = face.height + margin;
+    let margin_y = face.height * margin;
 
     let x1 = (face.x - margin_x).max(0.0);
     let y1 = (face.y - margin_y).max(0.0);

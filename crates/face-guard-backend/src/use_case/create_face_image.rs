@@ -164,7 +164,9 @@ mod tests {
     use std::{io::Cursor, sync::Mutex};
 
     use async_trait::async_trait;
-    use face_guard_ml::{EmbeddingModel, EmbeddingVector, GeneratedFaceEmbedding};
+    use face_guard_ml::{
+        EmbeddingModel, EmbeddingVector, FaceCrop, FaceDetector, GeneratedFaceEmbedding,
+    };
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 
     const TEST_IMAGE_KEY: &str = "faces/test.png";
@@ -329,6 +331,40 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    enum FakeDetectorMode {
+        Success(Vec<u8>),
+        Error(String),
+    }
+
+    #[derive(Debug)]
+    struct FakeFaceDetector {
+        mode: FakeDetectorMode,
+    }
+
+    impl FakeFaceDetector {
+        fn success(face_bytes: Vec<u8>) -> Self {
+            Self {
+                mode: FakeDetectorMode::Success(face_bytes),
+            }
+        }
+
+        fn failing(error: impl Into<String>) -> Self {
+            Self {
+                mode: FakeDetectorMode::Error(error.into()),
+            }
+        }
+    }
+
+    impl FaceDetector for FakeFaceDetector {
+        fn detect_primary_face(&mut self, _image_bytes: &[u8]) -> Result<FaceCrop> {
+            match &self.mode {
+                FakeDetectorMode::Success(face_bytes) => Ok(FaceCrop::new(face_bytes.clone())),
+                FakeDetectorMode::Error(error) => anyhow::bail!(error.clone()),
+            }
+        }
+    }
+
     fn valid_png_bytes() -> Vec<u8> {
         let image = ImageBuffer::from_pixel(64, 64, Rgba([10, 20, 30, 255]));
         let mut bytes = Cursor::new(Vec::new());
@@ -351,11 +387,13 @@ mod tests {
         repository: FakeRepository,
         storage: Arc<FakeObjectStorage>,
         embedding: FakeEmbeddingGenerator,
+        detector: FakeFaceDetector,
     ) -> CreateFaceImageUseCase<FakeRepository> {
         let storage: Arc<dyn ObjectStorage> = storage;
         let embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>> = Arc::new(Mutex::new(embedding));
+        let detector: Arc<Mutex<dyn FaceDetector>> = Arc::new(Mutex::new(detector));
 
-        CreateFaceImageUseCase::new(repository, storage, embedding)
+        CreateFaceImageUseCase::new(repository, storage, embedding, detector)
     }
 
     #[tokio::test]
@@ -370,6 +408,7 @@ mod tests {
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::success(),
+            FakeFaceDetector::success(valid_png_bytes()),
         );
 
         let output = use_case.execute(create_input()).await.unwrap();
@@ -408,6 +447,7 @@ mod tests {
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::success(),
+            FakeFaceDetector::success(valid_png_bytes()),
         );
 
         let error = use_case.execute(create_input()).await.unwrap_err();
@@ -429,6 +469,7 @@ mod tests {
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::success(),
+            FakeFaceDetector::success(valid_png_bytes()),
         );
 
         let error = use_case.execute(create_input()).await.unwrap_err();
@@ -456,6 +497,7 @@ mod tests {
             repository.clone(),
             storage.clone(),
             FakeEmbeddingGenerator::failing("embedding service failed"),
+            FakeFaceDetector::success(valid_png_bytes()),
         );
 
         let error = use_case.execute(create_input()).await.unwrap_err();
@@ -467,5 +509,30 @@ mod tests {
         assert_eq!(state.failed_face_image_ids, vec![state.face_images[0].id]);
         assert!(state.processed_face_image_ids.is_empty());
         assert!(state.embeddings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn execute_returns_face_detection_error_before_repository_writes() {
+        let repository = FakeRepository::default();
+        let storage = Arc::new(FakeObjectStorage::with_object(
+            TEST_IMAGE_KEY,
+            valid_png_bytes(),
+        ));
+        let use_case = build_use_case(
+            repository.clone(),
+            storage,
+            FakeEmbeddingGenerator::success(),
+            FakeFaceDetector::failing("no face detected"),
+        );
+
+        let error = use_case.execute(create_input()).await.unwrap_err();
+
+        assert_eq!(error.to_string(), "failed to detect face");
+
+        let state = repository.state();
+        assert!(state.face_images.is_empty());
+        assert!(state.embeddings.is_empty());
+        assert!(state.processed_face_image_ids.is_empty());
+        assert!(state.failed_face_image_ids.is_empty());
     }
 }
