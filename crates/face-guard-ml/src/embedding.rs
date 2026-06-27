@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use ort::{inputs, session::Session, value::TensorRef};
 
 #[derive(Debug, Clone)]
-pub struct EmbeddingModelsConfig {
+pub struct EmbeddingModelConfig {
     pub path: String,
     pub name: String,
     pub version: String,
@@ -75,7 +75,7 @@ pub struct FaceEmbedding {
 }
 
 impl FaceEmbedding {
-    pub fn new(model_config: &EmbeddingModelsConfig) -> Result<Self> {
+    pub fn new(model_config: &EmbeddingModelConfig) -> Result<Self> {
         let model = EmbeddingModel {
             name: model_config.name.clone(),
             version: model_config.version.clone(),
@@ -206,8 +206,8 @@ mod tests {
     const FACE_EMBEDDING_DIMENSION: usize = 3 * 112 * 112;
     const EPSILON: f32 = 1e-4;
 
-    fn model_config(path: impl Into<String>) -> EmbeddingModelsConfig {
-        EmbeddingModelsConfig {
+    fn model_config(path: impl Into<String>) -> EmbeddingModelConfig {
+        EmbeddingModelConfig {
             path: path.into(),
             name: "test-face-model".to_string(),
             version: "test-version".to_string(),

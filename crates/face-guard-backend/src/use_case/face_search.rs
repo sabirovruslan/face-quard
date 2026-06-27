@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
-use face_guard_ml::FaceEmbeddingGenerator;
+use face_guard_ml::{FaceDetector, FaceEmbeddingGenerator};
+use uuid::timestamp::context;
 
 use crate::{
     domain::{CollectionSlug, FaceImageId, FaceImageKey},
@@ -51,6 +52,7 @@ where
     repository: R,
     s3_storage: Arc<dyn ObjectStorage>,
     face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
+    face_detector: Arc<Mutex<dyn FaceDetector>>,
 }
 
 impl<R> SearchSimilarFaceUseCase<R>
@@ -61,11 +63,13 @@ where
         repository: R,
         s3_storage: Arc<dyn ObjectStorage>,
         face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
+        face_detector: Arc<Mutex<dyn FaceDetector>>,
     ) -> Self {
         Self {
             repository,
             s3_storage,
             face_embedding,
+            face_detector,
         }
     }
 
@@ -82,19 +86,37 @@ where
         validate_upload_input(&bytes)?;
         validate_image_bytes(&bytes)?;
 
-        let embedding_model = self.face_embedding.clone();
-        let image_bytes = bytes;
+        let face_crop = {
+            let face_detector = self.face_detector.clone();
+            let image_bytes = bytes;
 
-        let generated_embedding = tokio::task::spawn_blocking(move || {
-            let mut embedding_model = embedding_model
-                .lock()
-                .map_err(|_| anyhow!("face embedding model mutex poisoned"))?;
+            tokio::task::spawn_blocking(move || {
+                let mut face_detector = face_detector
+                    .lock()
+                    .map_err(|_| anyhow!("face detector mutex poisoned"))?;
 
-            embedding_model.generate_embedding(&image_bytes)
-        })
-        .await
-        .context("failed to join face embedding task")?
-        .context("failed to generate face embedding")?;
+                face_detector.detect_primary_face(&image_bytes)
+            })
+            .await
+            .context("failed to join face detection task")?
+            .context("failed to detect face")?
+        };
+
+        let generated_embedding = {
+            let embedding_model = self.face_embedding.clone();
+            let face_bytes = face_crop.into_bytes();
+
+            tokio::task::spawn_blocking(move || {
+                let mut embedding_model = embedding_model
+                    .lock()
+                    .map_err(|_| anyhow!("face embedding model mutex poisoned"))?;
+
+                embedding_model.generate_embedding(&face_bytes)
+            })
+            .await
+            .context("failed to join face embedding task")?
+            .context("failed to generate face embedding")?
+        };
 
         let matches = self
             .repository

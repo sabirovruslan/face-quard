@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
-use face_guard_ml::FaceEmbeddingGenerator;
+use face_guard_ml::{FaceDetector, FaceEmbeddingGenerator};
 
 use crate::{
     domain::{CollectionSlug, FaceEmbeddingId, FaceImageId, FaceImageKey, FaceImageStatus},
@@ -33,6 +33,7 @@ where
     repository: R,
     s3_storage: Arc<dyn ObjectStorage>,
     face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
+    face_detector: Arc<Mutex<dyn FaceDetector>>,
 }
 
 impl<R> CreateFaceImageUseCase<R>
@@ -43,11 +44,13 @@ where
         repository: R,
         s3_storage: Arc<dyn ObjectStorage>,
         face_embedding: Arc<Mutex<dyn FaceEmbeddingGenerator>>,
+        face_detector: Arc<Mutex<dyn FaceDetector>>,
     ) -> Self {
         Self {
             repository,
             s3_storage,
             face_embedding,
+            face_detector,
         }
     }
 
@@ -60,6 +63,22 @@ where
 
         validate_upload_input(&bytes).context("invalid upload input")?;
         validate_image_bytes(&bytes).context("invalid image")?;
+
+        let face_crop = {
+            let face_detector = self.face_detector.clone();
+            let image_bytes = bytes;
+
+            tokio::task::spawn_blocking(move || {
+                let mut face_detector = face_detector
+                    .lock()
+                    .map_err(|_| anyhow!("face detector mutex poisoned"))?;
+
+                face_detector.detect_primary_face(&image_bytes)
+            })
+            .await
+            .context("failed to join face detection task")?
+            .context("failed to detect face")?
+        };
 
         let face_image_id = FaceImageId::new();
 
@@ -74,35 +93,38 @@ where
             .await
             .context("failed to insert face image")?;
 
-        let embedding_model = self.face_embedding.clone();
-        let image_bytes = bytes;
-        let generated_embedding = match tokio::task::spawn_blocking(move || {
-            let mut embedding_model = embedding_model
-                .lock()
-                .map_err(|_| anyhow!("face embedding model mutex poisoned"))?;
+        let generated_embedding = {
+            let embedding_model = self.face_embedding.clone();
+            let face_bytes = face_crop.into_bytes();
 
-            embedding_model.generate_embedding(&image_bytes)
-        })
-        .await
-        {
-            Ok(Ok(embedding)) => embedding,
+            match tokio::task::spawn_blocking(move || {
+                let mut embedding_model = embedding_model
+                    .lock()
+                    .map_err(|_| anyhow!("face embedding model mutex poisoned"))?;
 
-            Ok(Err(err)) => {
-                self.repository
-                    .mark_face_image_failed(face_image_id)
-                    .await
-                    .context("failed to mark face image as failed")?;
+                embedding_model.generate_embedding(&face_bytes)
+            })
+            .await
+            {
+                Ok(Ok(embedding)) => embedding,
 
-                return Err(err).context("failed to generate face embedding");
-            }
+                Ok(Err(err)) => {
+                    self.repository
+                        .mark_face_image_failed(face_image_id)
+                        .await
+                        .context("failed to mark face image as failed")?;
 
-            Err(err) => {
-                self.repository
-                    .mark_face_image_failed(face_image_id)
-                    .await
-                    .context("failed to mark face image as failed")?;
+                    return Err(err).context("failed to generate face embedding");
+                }
 
-                return Err(err).context("failed to join face embedding task");
+                Err(err) => {
+                    self.repository
+                        .mark_face_image_failed(face_image_id)
+                        .await
+                        .context("failed to mark face image as failed")?;
+
+                    return Err(err).context("failed to join face embedding task");
+                }
             }
         };
 

@@ -2,13 +2,14 @@ use std::net::{AddrParseError, SocketAddr};
 
 use anyhow::{Context, Result};
 use common::{get_env, get_env_or_default};
-use face_guard_ml::EmbeddingModelsConfig;
+use face_guard_ml::{EmbeddingModelConfig, FaceDetectionModelConfig};
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    pub models: EmbeddingModelsConfig,
+    pub embedding_model: EmbeddingModelConfig,
+    pub detection_model: FaceDetectionModelConfig,
     pub storage: StorageConfig,
 }
 
@@ -64,7 +65,7 @@ impl AppConfig {
             access_key_id: get_env("S3_ACCESS_KEY_ID")?,
             secret_access_key: get_env("S3_SECRET_ACCESS_KEY")?,
         };
-        let models = EmbeddingModelsConfig {
+        let embedding_model = EmbeddingModelConfig {
             path: get_env("FACE_EMBEDDING_MODEL_PATH")?,
             name: get_env_or_default("FACE_EMBEDDING_MODEL_NAME", "insightface-buffalo-l"),
             version: get_env_or_default("FACE_EMBEDDING_MODEL_PATH_MODEL_VERSION", "w600k-r50"),
@@ -73,10 +74,21 @@ impl AppConfig {
                 .context("FACE_MODEL_DIMENSION must be a valid usize")?,
         };
 
+        let detection_model = FaceDetectionModelConfig {
+            path: get_env("FACE_DETECTION_MODEL_PATH")?,
+            name: get_env_or_default("FACE_DETECTION_MODEL_NAME", "insightface-scrfd"),
+            version: get_env_or_default("FACE_DETECTION_MODEL_VERSION", "10g-kps"),
+            input_size: get_env_or_default("FACE_DETECTION_INPUT_SIZE", "640").parse()?,
+            confidence_threshold: get_env_or_default("FACE_DETECTION_CONFIDENCE_THRESHOLD", "0.5")
+                .parse()?,
+            nms_threshold: get_env_or_default("FACE_DETECTION_NMS_THRESHOLD", "0.4").parse()?,
+        };
+
         Ok(Self {
             server,
             database,
-            models,
+            embedding_model,
+            detection_model,
             storage,
         })
     }
