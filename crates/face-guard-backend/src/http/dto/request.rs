@@ -43,7 +43,7 @@ impl SearchFaceRequest {
             bail!("max_faces must be greater than 0");
         }
 
-        if max_faces < Self::MAX_ALLOWED_FACES {
+        if max_faces > Self::MAX_ALLOWED_FACES {
             bail!(
                 "max_faces cannot be greater than {}",
                 Self::MAX_ALLOWED_FACES
