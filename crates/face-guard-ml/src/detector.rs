@@ -357,3 +357,198 @@ fn crop_face_to_png(image: &DynamicImage, face: FaceBox, margin: f32) -> Result<
 
     Ok(bytes.into_inner())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgb};
+
+    const EPSILON: f32 = 1e-6;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= EPSILON,
+            "expected {actual} to be close to {expected}"
+        );
+    }
+
+    fn rgb_image(width: u32, height: u32, pixel: Rgb<u8>) -> DynamicImage {
+        DynamicImage::ImageRgb8(ImageBuffer::from_pixel(width, height, pixel))
+    }
+
+    #[test]
+    fn face_crop_exposes_owned_and_borrowed_bytes() {
+        let crop = FaceCrop::new(vec![1, 2, 3]);
+
+        assert_eq!(crop.bytes(), &[1, 2, 3]);
+        assert_eq!(crop.into_bytes(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn preprocess_detector_image_letterboxes_and_normalizes_pixels() {
+        let image = rgb_image(4, 2, Rgb([255, 0, 127]));
+
+        let (input, letterbox) = preprocess_detector_image(&image, 8).unwrap();
+
+        assert_eq!(input.shape(), &[1, 3, 8, 8]);
+        assert_close(letterbox.scale, 2.0);
+        assert_close(letterbox.pad_x, 0.0);
+        assert_close(letterbox.pad_y, 2.0);
+
+        assert_close(input[[0, 0, 0, 0]], 0.0);
+        assert_close(input[[0, 1, 0, 0]], 0.0);
+        assert_close(input[[0, 2, 0, 0]], 0.0);
+
+        assert_close(input[[0, 0, 2, 0]], (255.0 - 127.5) / 128.0);
+        assert_close(input[[0, 1, 2, 0]], (0.0 - 127.5) / 128.0);
+        assert_close(input[[0, 2, 2, 0]], (127.0 - 127.5) / 128.0);
+    }
+
+    #[test]
+    fn decode_scrfd_level_decodes_boxes_and_filters_by_confidence() {
+        let scores = vec![0.9, 0.2];
+        let bboxes = vec![
+            0.25, 0.25, 0.25, 0.25, // kept: center 4,4 and 2 px each side
+            0.5, 0.5, 0.5, 0.5, // filtered by confidence
+        ];
+        let letterbox = LetterboxInfo {
+            scale: 1.0,
+            pad_x: 0.0,
+            pad_y: 0.0,
+        };
+
+        let faces = decode_scrfd_level(&scores, &bboxes, 8, 8, &letterbox, 0.5).unwrap();
+
+        assert_eq!(faces.len(), 1);
+        assert_close(faces[0].x, 2.0);
+        assert_close(faces[0].y, 2.0);
+        assert_close(faces[0].width, 4.0);
+        assert_close(faces[0].height, 4.0);
+        assert_close(faces[0].confidence, 0.9);
+    }
+
+    #[test]
+    fn decode_scrfd_level_maps_letterboxed_coordinates_back_to_original_image() {
+        let scores = vec![0.9, 0.0];
+        let bboxes = vec![0.25, 0.25, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0];
+        let letterbox = LetterboxInfo {
+            scale: 2.0,
+            pad_x: 0.0,
+            pad_y: 2.0,
+        };
+
+        let faces = decode_scrfd_level(&scores, &bboxes, 8, 8, &letterbox, 0.5).unwrap();
+
+        assert_eq!(faces.len(), 1);
+        assert_close(faces[0].x, 1.0);
+        assert_close(faces[0].y, 0.0);
+        assert_close(faces[0].width, 2.0);
+        assert_close(faces[0].height, 2.0);
+    }
+
+    #[test]
+    fn decode_scrfd_level_rejects_short_outputs() {
+        let letterbox = LetterboxInfo {
+            scale: 1.0,
+            pad_x: 0.0,
+            pad_y: 0.0,
+        };
+
+        let error = decode_scrfd_level(&[0.9], &[0.0; 8], 8, 8, &letterbox, 0.5).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "SCRFD score output is smaller than expected"
+        );
+
+        let error = decode_scrfd_level(&[0.9, 0.8], &[0.0; 7], 8, 8, &letterbox, 0.5).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "SCRFD bbox output is smaller than expected"
+        );
+    }
+
+    #[test]
+    fn iou_returns_overlap_ratio() {
+        let a = FaceBox {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            confidence: 0.9,
+        };
+        let b = FaceBox {
+            x: 5.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            confidence: 0.8,
+        };
+
+        assert_close(iou(a, b), 50.0 / 150.0);
+    }
+
+    #[test]
+    fn nms_keeps_highest_confidence_overlapping_box() {
+        let faces = vec![
+            FaceBox {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+                confidence: 0.7,
+            },
+            FaceBox {
+                x: 1.0,
+                y: 1.0,
+                width: 10.0,
+                height: 10.0,
+                confidence: 0.9,
+            },
+            FaceBox {
+                x: 30.0,
+                y: 30.0,
+                width: 5.0,
+                height: 5.0,
+                confidence: 0.8,
+            },
+        ];
+
+        let selected = nms(faces, 0.4);
+
+        assert_eq!(selected.len(), 2);
+        assert_close(selected[0].confidence, 0.9);
+        assert_close(selected[1].confidence, 0.8);
+    }
+
+    #[test]
+    fn crop_face_to_png_expands_by_margin_and_clamps_to_image_bounds() {
+        let image = rgb_image(10, 10, Rgb([10, 20, 30]));
+        let face = FaceBox {
+            x: 2.0,
+            y: 2.0,
+            width: 4.0,
+            height: 4.0,
+            confidence: 0.9,
+        };
+
+        let bytes = crop_face_to_png(&image, face, 0.25).unwrap();
+        let crop = image::load_from_memory(&bytes).unwrap();
+
+        assert_eq!(crop.dimensions(), (6, 6));
+
+        let edge_face = FaceBox {
+            x: 0.0,
+            y: 0.0,
+            width: 4.0,
+            height: 4.0,
+            confidence: 0.9,
+        };
+
+        let bytes = crop_face_to_png(&image, edge_face, 0.25).unwrap();
+        let crop = image::load_from_memory(&bytes).unwrap();
+
+        assert_eq!(crop.dimensions(), (5, 5));
+    }
+}
