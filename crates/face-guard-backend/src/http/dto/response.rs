@@ -1,9 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::repository::face_image::{FaceImageItem, ListFaceImagesCursor, ListFaceImagesOutput};
+use crate::repository::face_image::ListFaceImagesCursor;
 use crate::use_case::create_face_image::CreateFaceImageOutput;
 use crate::use_case::face_search::{SearchSimilarFaceMatch, SearchSimilarFaceOutput};
+use crate::use_case::list_face_image::{ListFaceImagesOutput, ListedFaceImageItem};
 use crate::use_case::upload_object::UploadOgjectOutput;
 
 #[derive(Debug, Serialize)]
@@ -91,21 +92,23 @@ impl From<ListFaceImagesCursor> for ListFaceImagesCursorResponse {
 pub struct FaceImageResponse {
     pub id: String,
     pub image_key: String,
+    pub downlod_url: String,
     pub collection_slug: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<FaceImageItem> for FaceImageResponse {
-    fn from(value: FaceImageItem) -> Self {
+impl From<ListedFaceImageItem> for FaceImageResponse {
+    fn from(value: ListedFaceImageItem) -> Self {
         Self {
-            id: value.id.to_string(),
-            image_key: value.image_key.as_str().to_string(),
-            collection_slug: value.collection_slug.to_string(),
-            status: value.status.as_str().to_string(),
-            created_at: value.created_at,
-            updated_at: value.updated_at,
+            id: value.item.id.to_string(),
+            image_key: value.item.image_key.as_str().to_string(),
+            downlod_url: value.downlod_url.to_string(),
+            collection_slug: value.item.collection_slug.to_string(),
+            status: value.item.status.as_str().to_string(),
+            created_at: value.item.created_at,
+            updated_at: value.item.updated_at,
         }
     }
 }

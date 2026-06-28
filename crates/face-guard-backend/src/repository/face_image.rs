@@ -143,7 +143,7 @@ impl TryFrom<FaceImageItemRow> for FaceImageItem {
 type FaceImageItemRow = (Uuid, String, String, String, DateTime<Utc>, DateTime<Utc>);
 
 #[derive(Debug)]
-pub struct ListFaceImagesOutput {
+pub struct ListFaceImagesPage {
     pub items: Vec<FaceImageItem>,
     pub next_cursor: Option<ListFaceImagesCursor>,
     pub has_more: bool,
@@ -151,12 +151,12 @@ pub struct ListFaceImagesOutput {
 
 #[async_trait]
 pub trait FaceImageReadRepository: Send + Sync {
-    async fn search(&self, query: ListFaceImagesQuery) -> Result<ListFaceImagesOutput>;
+    async fn search(&self, query: ListFaceImagesQuery) -> Result<ListFaceImagesPage>;
 }
 
 #[async_trait]
 impl FaceImageReadRepository for PgRepository {
-    async fn search(&self, query: ListFaceImagesQuery) -> Result<ListFaceImagesOutput> {
+    async fn search(&self, query: ListFaceImagesQuery) -> Result<ListFaceImagesPage> {
         if query.limit == 0 {
             bail!("limit must be greater than 0");
         }
@@ -211,7 +211,7 @@ impl FaceImageReadRepository for PgRepository {
             None
         };
 
-        Ok(ListFaceImagesOutput {
+        Ok(ListFaceImagesPage {
             items: searched_face_images,
             next_cursor,
             has_more,

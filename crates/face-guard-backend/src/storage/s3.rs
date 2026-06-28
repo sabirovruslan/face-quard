@@ -1,17 +1,21 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
 use async_trait::async_trait;
 use object_store::{
-    Attribute, Attributes, ObjectStore, ObjectStoreExt, PutMode, PutOptions, aws::AmazonS3Builder,
+    Attribute, Attributes, ObjectStore, ObjectStoreExt, PutMode, PutOptions,
+    aws::{AmazonS3, AmazonS3Builder},
     path::Path,
+    signer::Signer,
 };
+use reqwest::Method;
 
 use crate::{config::StorageConfig, storage::ObjectStorage};
 
 #[derive(Clone)]
 pub struct S3ObjectStorage {
-    store: Arc<dyn ObjectStore>,
+    store: Arc<AmazonS3>,
+    public_signer: Arc<AmazonS3>,
 }
 
 impl S3ObjectStorage {
@@ -24,10 +28,21 @@ impl S3ObjectStorage {
             .with_endpoint(&config.endpoint)
             .with_allow_http(true)
             .build()
-            .context("ailed to build S3 object storage client")?;
+            .context("failed to build S3 object storage client")?;
+
+        let public_signer = AmazonS3Builder::new()
+            .with_bucket_name(&config.bucket)
+            .with_region(&config.region)
+            .with_access_key_id(&config.access_key_id)
+            .with_secret_access_key(&config.secret_access_key)
+            .with_endpoint(&config.public_endpoint)
+            .with_allow_http(true)
+            .build()
+            .context("failed to build public S3 signer")?;
 
         Ok(Self {
             store: Arc::new(store),
+            public_signer: Arc::new(public_signer),
         })
     }
 }
@@ -67,5 +82,15 @@ impl ObjectStorage for S3ObjectStorage {
             .with_context(|| format!("failed to read object bytes from S3 with key '{}'", key))?;
 
         Ok(bytes.to_vec())
+    }
+
+    async fn presigned_get_url(&self, key: &str, expires_in: Duration) -> Result<String> {
+        let url = self
+            .public_signer
+            .signed_url(Method::GET, &Path::from(key), expires_in)
+            .await
+            .with_context(|| format!("failed to generate presigned GET URL for key '{key}'"))?;
+
+        Ok(url.to_string())
     }
 }

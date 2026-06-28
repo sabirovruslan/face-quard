@@ -31,6 +31,7 @@ config.workspace = true
 image.workspace = true
 
 async-trait = "0.1"
+reqwest = { version = "0.13", default-features = false }
 
 face-guard-ml = { path = "../face-guard-ml" }
 common = { path = "../common" }

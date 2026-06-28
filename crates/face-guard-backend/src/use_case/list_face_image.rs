@@ -1,10 +1,15 @@
+use std::{sync::Arc, time::Duration};
+
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 
 use crate::{
-    domain::{CollectionSlug, FaceImageStatus},
+    domain::{CollectionSlug, FaceImageId, FaceImageKey, FaceImageStatus},
     repository::face_image::{
-        FaceImageReadRepository, ListFaceImagesCursor, ListFaceImagesOutput, ListFaceImagesQuery,
+        FaceImageItem, FaceImageReadRepository, ListFaceImagesCursor, ListFaceImagesPage,
+        ListFaceImagesQuery,
     },
+    storage::ObjectStorage,
 };
 
 #[derive(Debug)]
@@ -15,23 +20,39 @@ pub struct ListFaceImagesInput {
     pub cursor: Option<ListFaceImagesCursor>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ListedFaceImageItem {
+    pub item: FaceImageItem,
+    pub downlod_url: String,
+}
+
+pub struct ListFaceImagesOutput {
+    pub items: Vec<ListedFaceImageItem>,
+    pub next_cursor: Option<ListFaceImagesCursor>,
+    pub has_more: bool,
+}
+
 pub struct ListFaceImagesUseCase<R>
 where
     R: FaceImageReadRepository,
 {
     repository: R,
+    s3_storage: Arc<dyn ObjectStorage>,
 }
 
 impl<R> ListFaceImagesUseCase<R>
 where
     R: FaceImageReadRepository,
 {
-    pub fn new(repository: R) -> Self {
-        Self { repository }
+    pub fn new(repository: R, s3_storage: Arc<dyn ObjectStorage>) -> Self {
+        Self {
+            repository,
+            s3_storage,
+        }
     }
 
     pub async fn execute(&self, input: ListFaceImagesInput) -> Result<ListFaceImagesOutput> {
-        let items = self
+        let page = self
             .repository
             .search(ListFaceImagesQuery {
                 collection_slug: input.collection_slug,
@@ -45,7 +66,24 @@ where
             .await
             .context("failed to get list of face images")?;
 
-        Ok(items)
+        let mut items = Vec::with_capacity(page.items.len());
+        for page_item in page.items {
+            let download_url = self
+                .s3_storage
+                .presigned_get_url(page_item.image_key.as_str(), Duration::from_secs(15 * 60))
+                .await?;
+
+            items.push(ListedFaceImageItem {
+                item: page_item,
+                downlod_url: download_url,
+            });
+        }
+
+        Ok(ListFaceImagesOutput {
+            items,
+            next_cursor: page.next_cursor,
+            has_more: page.has_more,
+        })
     }
 }
 
@@ -77,7 +115,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct FakeRepositoryState {
         last_query: Option<CapturedQuery>,
-        output: Option<ListFaceImagesOutput>,
+        output: Option<ListFaceImagesPage>,
         error: Option<String>,
     }
 
@@ -87,7 +125,7 @@ mod tests {
     }
 
     impl FakeRepository {
-        fn with_output(output: ListFaceImagesOutput) -> Self {
+        fn with_output(output: ListFaceImagesPage) -> Self {
             Self {
                 state: Arc::new(Mutex::new(FakeRepositoryState {
                     last_query: None,
@@ -114,7 +152,7 @@ mod tests {
 
     #[async_trait]
     impl FaceImageReadRepository for FakeRepository {
-        async fn search(&self, query: ListFaceImagesQuery) -> Result<ListFaceImagesOutput> {
+        async fn search(&self, query: ListFaceImagesQuery) -> Result<ListFaceImagesPage> {
             let mut state = self.state.lock().unwrap();
 
             state.last_query = Some(CapturedQuery {
@@ -176,7 +214,7 @@ mod tests {
     async fn execute_returns_repository_output() {
         let item = face_image_item("faces/person-1.jpg");
         let next_cursor = ListFaceImagesCursor::from(&item);
-        let repository = FakeRepository::with_output(ListFaceImagesOutput {
+        let repository = FakeRepository::with_output(ListFaceImagesPage {
             items: vec![item.clone()],
             next_cursor: Some(next_cursor),
             has_more: true,
@@ -220,8 +258,8 @@ mod tests {
         assert!(error.contains("database is unavailable"));
     }
 
-    fn empty_output() -> ListFaceImagesOutput {
-        ListFaceImagesOutput {
+    fn empty_output() -> ListFaceImagesPage {
+        ListFaceImagesPage {
             items: Vec::new(),
             next_cursor: None,
             has_more: false,

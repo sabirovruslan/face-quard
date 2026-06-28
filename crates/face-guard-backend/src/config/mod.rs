@@ -38,6 +38,7 @@ pub struct DatabaseConfig {
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
     pub endpoint: String,
+    pub public_endpoint: String,
     pub region: String,
     pub bucket: String,
     pub access_key_id: String,
@@ -60,6 +61,7 @@ impl AppConfig {
         };
         let storage = StorageConfig {
             endpoint: get_env("S3_ENDPOINT")?,
+            public_endpoint: get_env_or_default("S3_PUBLIC_ENDPOINT", &get_env("S3_ENDPOINT")?),
             region: get_env_or_default("S3_REGION", "us-east-1"),
             bucket: get_env("S3_BUCKET")?,
             access_key_id: get_env("S3_ACCESS_KEY_ID")?,
