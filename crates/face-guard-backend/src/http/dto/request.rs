@@ -4,14 +4,14 @@ use serde::Deserialize;
 use crate::domain::{CollectionSlug, FaceImageKey};
 
 #[derive(Debug, Deserialize)]
-pub struct SearchFaceRequest {
+pub struct SearchSimilarFaceRequest {
     pub image_key: String,
     pub max_faces: Option<usize>,
     pub similarity_threshold: Option<f32>,
     pub collection_slug: Option<String>,
 }
 
-impl SearchFaceRequest {
+impl SearchSimilarFaceRequest {
     pub const MAX_ALLOWED_FACES: usize = 100;
 
     pub fn image_key(&self) -> Result<FaceImageKey> {

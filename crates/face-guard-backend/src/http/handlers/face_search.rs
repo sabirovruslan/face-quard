@@ -4,7 +4,7 @@ use axum::{Json, extract::State};
 use crate::{
     bootstrap::server::AppState,
     http::{
-        dto::{request::SearchFaceRequest, response::SearchFaceResponse},
+        dto::{request::SearchSimilarFaceRequest, response::SearchFaceResponse},
         error::AppHttpError,
     },
     repository::PgRepository,
@@ -13,7 +13,7 @@ use crate::{
 
 pub async fn search_similar_face(
     State(state): State<AppState>,
-    Json(request): Json<SearchFaceRequest>,
+    Json(request): Json<SearchSimilarFaceRequest>,
 ) -> Result<Json<SearchFaceResponse>, AppHttpError> {
     request.validate()?;
 

@@ -2,7 +2,7 @@ use axum::{
     Router,
     routing::{get, post},
 };
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::{
     bootstrap::server::AppState,
@@ -21,5 +21,8 @@ pub fn create_router(state: AppState) -> Router {
     let router = router.route("/api/v1/faces/create", post(create_face_image));
     let router = router.route("/api/v1/faces/search_similar", post(search_similar_face));
 
-    router.with_state(state).layer(CorsLayer::permissive())
+    router
+        .with_state(state)
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http())
 }
