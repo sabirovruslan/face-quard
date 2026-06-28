@@ -142,6 +142,7 @@ impl TryFrom<FaceImageItemRow> for FaceImageItem {
 
 type FaceImageItemRow = (Uuid, String, String, String, DateTime<Utc>, DateTime<Utc>);
 
+#[derive(Debug)]
 pub struct ListFaceImagesOutput {
     pub items: Vec<FaceImageItem>,
     pub next_cursor: Option<ListFaceImagesCursor>,
