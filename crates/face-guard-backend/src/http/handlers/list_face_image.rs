@@ -27,7 +27,8 @@ pub async fn list_face_images(
         }),
     };
 
-    let use_case = ListFaceImagesUseCase::new(PgRepository::new(state.db_pool));
+    let use_case =
+        ListFaceImagesUseCase::new(PgRepository::new(state.db_pool), state.s3_storage.clone());
     let output = use_case.execute(input).await?;
     let response = ListFaceImagesResponse::from(output);
 

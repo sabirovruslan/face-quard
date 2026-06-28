@@ -92,7 +92,7 @@ impl From<ListFaceImagesCursor> for ListFaceImagesCursorResponse {
 pub struct FaceImageResponse {
     pub id: String,
     pub image_key: String,
-    pub downlod_url: String,
+    pub download_url: String,
     pub collection_slug: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
@@ -104,7 +104,7 @@ impl From<ListedFaceImageItem> for FaceImageResponse {
         Self {
             id: value.item.id.to_string(),
             image_key: value.item.image_key.as_str().to_string(),
-            downlod_url: value.downlod_url.to_string(),
+            download_url: value.download_url,
             collection_slug: value.item.collection_slug.to_string(),
             status: value.item.status.as_str().to_string(),
             created_at: value.item.created_at,

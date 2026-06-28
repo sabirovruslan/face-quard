@@ -1,13 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 
 use crate::{
-    domain::{CollectionSlug, FaceImageId, FaceImageKey, FaceImageStatus},
+    domain::{CollectionSlug, FaceImageStatus},
     repository::face_image::{
-        FaceImageItem, FaceImageReadRepository, ListFaceImagesCursor, ListFaceImagesPage,
-        ListFaceImagesQuery,
+        FaceImageItem, FaceImageReadRepository, ListFaceImagesCursor, ListFaceImagesQuery,
     },
     storage::ObjectStorage,
 };
@@ -23,9 +21,10 @@ pub struct ListFaceImagesInput {
 #[derive(Debug, Clone)]
 pub struct ListedFaceImageItem {
     pub item: FaceImageItem,
-    pub downlod_url: String,
+    pub download_url: String,
 }
 
+#[derive(Debug)]
 pub struct ListFaceImagesOutput {
     pub items: Vec<ListedFaceImageItem>,
     pub next_cursor: Option<ListFaceImagesCursor>,
@@ -75,7 +74,7 @@ where
 
             items.push(ListedFaceImageItem {
                 item: page_item,
-                downlod_url: download_url,
+                download_url,
             });
         }
 
@@ -100,7 +99,8 @@ mod tests {
 
     use crate::{
         domain::{FaceImageId, FaceImageKey},
-        repository::face_image::FaceImageItem,
+        repository::face_image::{FaceImageItem, ListFaceImagesPage},
+        storage::ObjectStorage,
     };
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,12 +177,60 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct FakeObjectStorage {
+        presigned_get_url_requests: Mutex<Vec<(String, Duration)>>,
+        presigned_get_url_error: Option<String>,
+    }
+
+    impl FakeObjectStorage {
+        fn failing_presigned_get_url(error: impl Into<String>) -> Self {
+            Self {
+                presigned_get_url_requests: Mutex::new(Vec::new()),
+                presigned_get_url_error: Some(error.into()),
+            }
+        }
+
+        fn presigned_get_url_requests(&self) -> Vec<(String, Duration)> {
+            self.presigned_get_url_requests.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl ObjectStorage for FakeObjectStorage {
+        async fn put_object(&self, _key: &str, _content_type: &str, _bytes: Vec<u8>) -> Result<()> {
+            unimplemented!("list face images use case does not write objects")
+        }
+
+        async fn get_object(&self, _key: &str) -> Result<Vec<u8>> {
+            unimplemented!("list face images use case does not read object bytes")
+        }
+
+        async fn presigned_get_url(&self, key: &str, expires_in: Duration) -> Result<String> {
+            self.presigned_get_url_requests
+                .lock()
+                .unwrap()
+                .push((key.to_string(), expires_in));
+
+            if let Some(error) = &self.presigned_get_url_error {
+                bail!(error.clone());
+            }
+
+            Ok(format!("https://storage.test/{key}"))
+        }
+    }
+
+    fn object_storage() -> Arc<FakeObjectStorage> {
+        Arc::new(FakeObjectStorage::default())
+    }
+
     #[tokio::test]
     async fn execute_forwards_input_to_repository_query() {
         let cursor_id = FaceImageId::from_uuid(Uuid::new_v4());
         let cursor_created_at = Utc.with_ymd_and_hms(2026, 6, 28, 10, 0, 0).unwrap();
         let repository = FakeRepository::with_output(empty_output());
-        let use_case = ListFaceImagesUseCase::new(repository.clone());
+        let storage = object_storage();
+        let use_case = ListFaceImagesUseCase::new(repository.clone(), storage);
 
         let output = use_case
             .execute(ListFaceImagesInput {
@@ -219,7 +267,8 @@ mod tests {
             next_cursor: Some(next_cursor),
             has_more: true,
         });
-        let use_case = ListFaceImagesUseCase::new(repository);
+        let storage = object_storage();
+        let use_case = ListFaceImagesUseCase::new(repository, storage.clone());
 
         let output = use_case
             .execute(ListFaceImagesInput {
@@ -232,16 +281,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(output.items.len(), 1);
-        assert_eq!(output.items[0].id, item.id);
-        assert_eq!(output.items[0].image_key, item.image_key);
+        assert_eq!(output.items[0].item.id, item.id);
+        assert_eq!(output.items[0].item.image_key, item.image_key);
+        assert_eq!(
+            output.items[0].download_url,
+            "https://storage.test/faces/person-1.jpg"
+        );
         assert!(output.next_cursor.is_some());
         assert!(output.has_more);
+        assert_eq!(
+            storage.presigned_get_url_requests(),
+            vec![(
+                "faces/person-1.jpg".to_string(),
+                Duration::from_secs(15 * 60)
+            )]
+        );
     }
 
     #[tokio::test]
     async fn execute_wraps_repository_error_with_context() {
         let repository = FakeRepository::failing("database is unavailable");
-        let use_case = ListFaceImagesUseCase::new(repository);
+        let storage = object_storage();
+        let use_case = ListFaceImagesUseCase::new(repository, storage);
 
         let error = use_case
             .execute(ListFaceImagesInput {
@@ -256,6 +317,31 @@ mod tests {
         let error = format!("{error:#}");
         assert!(error.contains("failed to get list of face images"));
         assert!(error.contains("database is unavailable"));
+    }
+
+    #[tokio::test]
+    async fn execute_returns_presigned_url_error() {
+        let repository = FakeRepository::with_output(ListFaceImagesPage {
+            items: vec![face_image_item("faces/person-1.jpg")],
+            next_cursor: None,
+            has_more: false,
+        });
+        let storage = Arc::new(FakeObjectStorage::failing_presigned_get_url(
+            "presign is unavailable",
+        ));
+        let use_case = ListFaceImagesUseCase::new(repository, storage);
+
+        let error = use_case
+            .execute(ListFaceImagesInput {
+                collection_slug: None,
+                status: None,
+                limit: 10,
+                cursor: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("presign is unavailable"));
     }
 
     fn empty_output() -> ListFaceImagesPage {

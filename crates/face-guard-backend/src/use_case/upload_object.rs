@@ -104,6 +104,14 @@ mod tests {
         async fn get_object(&self, _key: &str) -> Result<Vec<u8>> {
             unimplemented!("upload object use case does not read objects")
         }
+
+        async fn presigned_get_url(
+            &self,
+            _key: &str,
+            _expires_in: std::time::Duration,
+        ) -> Result<String> {
+            unimplemented!("upload object use case does not generate presigned URLs")
+        }
     }
 
     fn valid_png_bytes() -> Vec<u8> {

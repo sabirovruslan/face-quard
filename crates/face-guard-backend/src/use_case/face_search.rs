@@ -224,6 +224,14 @@ mod tests {
                 .map(|object| object.bytes.clone())
                 .ok_or_else(|| anyhow::anyhow!("object not found: {key}"))
         }
+
+        async fn presigned_get_url(
+            &self,
+            _key: &str,
+            _expires_in: std::time::Duration,
+        ) -> Result<String> {
+            unimplemented!("face search use case does not generate presigned URLs")
+        }
     }
 
     #[derive(Debug, Default)]
