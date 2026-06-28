@@ -1,5 +1,7 @@
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::repository::face_image::{FaceImageItem, ListFaceImagesCursor, ListFaceImagesOutput};
 use crate::use_case::create_face_image::CreateFaceImageOutput;
 use crate::use_case::face_search::{SearchSimilarFaceMatch, SearchSimilarFaceOutput};
 use crate::use_case::upload_object::UploadOgjectOutput;
@@ -66,6 +68,65 @@ impl From<UploadOgjectOutput> for UploadObjectResponse {
     fn from(value: UploadOgjectOutput) -> Self {
         Self {
             image_key: value.image_key.as_str().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListFaceImagesCursorResponse {
+    pub created_at: DateTime<Utc>,
+    pub id: String,
+}
+
+impl From<ListFaceImagesCursor> for ListFaceImagesCursorResponse {
+    fn from(value: ListFaceImagesCursor) -> Self {
+        Self {
+            created_at: value.created_at,
+            id: value.id.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct FaceImageResponse {
+    pub id: String,
+    pub image_key: String,
+    pub collection_slug: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<FaceImageItem> for FaceImageResponse {
+    fn from(value: FaceImageItem) -> Self {
+        Self {
+            id: value.id.to_string(),
+            image_key: value.image_key.as_str().to_string(),
+            collection_slug: value.collection_slug.to_string(),
+            status: value.status.as_str().to_string(),
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListFaceImagesResponse {
+    pub items: Vec<FaceImageResponse>,
+    pub next_cursor: Option<ListFaceImagesCursorResponse>,
+    pub has_more: bool,
+}
+
+impl From<ListFaceImagesOutput> for ListFaceImagesResponse {
+    fn from(value: ListFaceImagesOutput) -> Self {
+        Self {
+            items: value
+                .items
+                .into_iter()
+                .map(FaceImageResponse::from)
+                .collect(),
+            next_cursor: value.next_cursor.map(ListFaceImagesCursorResponse::from),
+            has_more: value.has_more,
         }
     }
 }

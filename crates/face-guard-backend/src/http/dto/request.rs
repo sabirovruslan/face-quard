@@ -1,7 +1,9 @@
-use anyhow::{Result, bail};
+use anyhow::{Ok, Result, bail};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use uuid::Uuid;
 
-use crate::domain::{CollectionSlug, FaceImageKey};
+use crate::domain::{CollectionSlug, FaceImageKey, FaceImageStatus};
 
 #[derive(Debug, Deserialize)]
 pub struct SearchSimilarFaceRequest {
@@ -74,5 +76,56 @@ impl CreateFaceImageRequest {
             Some(value) => CollectionSlug::new(value),
             None => Ok(CollectionSlug::default_collection()),
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListFaceImagesRequest {
+    pub collection_slug: Option<String>,
+    pub status: Option<String>,
+    pub limit: Option<usize>,
+    pub cursor: Option<ListFaceImagesCursorRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListFaceImagesCursorRequest {
+    pub created_at: DateTime<Utc>,
+    pub id: Uuid,
+}
+
+impl ListFaceImagesRequest {
+    pub const DEFAULT_LIMIT: usize = 20;
+    pub const MAX_LIMIT: usize = 100;
+
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(Self::DEFAULT_LIMIT)
+    }
+
+    pub fn collection_slug(&self) -> Result<Option<CollectionSlug>> {
+        self.collection_slug
+            .as_deref()
+            .map(CollectionSlug::new)
+            .transpose()
+    }
+
+    pub fn status(&self) -> Result<Option<FaceImageStatus>> {
+        self.status
+            .as_deref()
+            .map(FaceImageStatus::try_from)
+            .transpose()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let limit = self.limit();
+
+        if limit == 0 {
+            bail!("limit must be greater than 0");
+        }
+
+        if limit > Self::MAX_LIMIT {
+            bail!("limit cannot be greater than {}", Self::MAX_LIMIT);
+        }
+
+        Ok(())
     }
 }
