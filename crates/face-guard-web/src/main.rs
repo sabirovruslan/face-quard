@@ -8,7 +8,6 @@ mod app {
     use wasm_bindgen_futures::spawn_local;
     use web_sys::{FormData, HtmlInputElement, Url};
 
-    const RECENT_KEYS_STORAGE_KEY: &str = "faceGuard.recentKeys";
     const API_URL_STORAGE_KEY: &str = "faceGuard.apiUrl";
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -32,7 +31,32 @@ mod app {
     struct SearchFaceMatchResponse {
         id: String,
         image_key: String,
+        download_url: String,
         similarity: f32,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+    struct ListFaceImagesCursorResponse {
+        created_at: String,
+        id: String,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    struct FaceImageResponse {
+        id: String,
+        image_key: String,
+        download_url: String,
+        collection_slug: String,
+        status: String,
+        created_at: String,
+        updated_at: String,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    struct ListFaceImagesResponse {
+        items: Vec<FaceImageResponse>,
+        next_cursor: Option<ListFaceImagesCursorResponse>,
+        has_more: bool,
     }
 
     #[component]
@@ -45,7 +69,8 @@ mod app {
         let health_class = RwSignal::new("health".to_string());
 
         let collection = RwSignal::new("test_collection".to_string());
-        let recent_keys = RwSignal::new(load_recent_keys());
+        let list_status = RwSignal::new("processed".to_string());
+        let list_limit = RwSignal::new(20usize);
 
         let selected_file_meta = RwSignal::new("None".to_string());
         let file_preview_url = RwSignal::new(String::new());
@@ -53,10 +78,32 @@ mod app {
         let create_output = RwSignal::new(String::new());
         let search_output = RwSignal::new(String::new());
         let matches = RwSignal::new(Vec::<SearchFaceMatchResponse>::new());
+        let face_images = RwSignal::new(Vec::<FaceImageResponse>::new());
+        let face_images_output = RwSignal::new(String::new());
+        let current_face_images_cursor = RwSignal::new(None::<ListFaceImagesCursorResponse>);
+        let next_face_images_cursor = RwSignal::new(None::<ListFaceImagesCursorResponse>);
+        let face_images_cursor_stack =
+            RwSignal::new(Vec::<Option<ListFaceImagesCursorResponse>>::new());
 
         let upload_busy = RwSignal::new(false);
         let create_busy = RwSignal::new(false);
         let search_busy = RwSignal::new(false);
+        let face_images_busy = RwSignal::new(false);
+
+        Effect::new(move |_| {
+            load_face_images(
+                api_url,
+                collection,
+                list_status,
+                list_limit,
+                face_images,
+                face_images_output,
+                face_images_busy,
+                current_face_images_cursor,
+                next_face_images_cursor,
+                None,
+            );
+        });
 
         let check_health = move |event: SubmitEvent| {
             event.prevent_default();
@@ -159,7 +206,6 @@ mod app {
                         upload_output.set(pretty_json(&body));
                         set_input_value("create-key", &body.image_key);
                         set_input_value("search-key", &body.image_key);
-                        remember_key(recent_keys, body.image_key);
                     }
                     Err(error) => upload_output.set(error),
                 }
@@ -172,6 +218,7 @@ mod app {
             event.prevent_default();
 
             let image_key = input_value("create-key");
+            let created_image_key = image_key.clone();
             let collection_slug = collection.get_untracked();
             let url = format!("{}/api/v1/faces/create", api_base(api_url));
 
@@ -187,7 +234,20 @@ mod app {
                 match post_json::<CreateFaceImageResponse>(&url, payload).await {
                     Ok(body) => {
                         create_output.set(pretty_json(&body));
-                        remember_key(recent_keys, input_value("create-key"));
+                        set_input_value("search-key", &created_image_key);
+                        face_images_cursor_stack.set(Vec::new());
+                        load_face_images(
+                            api_url,
+                            collection,
+                            list_status,
+                            list_limit,
+                            face_images,
+                            face_images_output,
+                            face_images_busy,
+                            current_face_images_cursor,
+                            next_face_images_cursor,
+                            None,
+                        );
                     }
                     Err(error) => create_output.set(error),
                 }
@@ -198,36 +258,75 @@ mod app {
 
         let submit_search = move |event: SubmitEvent| {
             event.prevent_default();
+            run_search(
+                api_url,
+                collection,
+                search_output,
+                matches,
+                search_busy,
+                input_value("search-key"),
+            );
+        };
 
-            let image_key = input_value("search-key");
-            let collection_slug = collection.get_untracked();
-            let max_faces = input_value("max-faces").parse::<usize>().unwrap_or(10);
-            let similarity_threshold = input_value("threshold").parse::<f32>().unwrap_or(80.0);
-            let url = format!("{}/api/v1/faces/search_similar", api_base(api_url));
+        let submit_face_images = move |event: SubmitEvent| {
+            event.prevent_default();
+            face_images_cursor_stack.set(Vec::new());
+            load_face_images(
+                api_url,
+                collection,
+                list_status,
+                list_limit,
+                face_images,
+                face_images_output,
+                face_images_busy,
+                current_face_images_cursor,
+                next_face_images_cursor,
+                None,
+            );
+        };
 
-            search_busy.set(true);
-            search_output.set("Searching...".to_string());
-            matches.set(Vec::new());
+        let next_face_images_page = move |_| {
+            let Some(cursor) = next_face_images_cursor.get_untracked() else {
+                return;
+            };
 
-            spawn_local(async move {
-                let payload = serde_json::json!({
-                    "image_key": image_key,
-                    "collection_slug": nullable_string(collection_slug),
-                    "max_faces": max_faces,
-                    "similarity_threshold": similarity_threshold,
-                });
+            let current_cursor = current_face_images_cursor.get_untracked();
+            face_images_cursor_stack.update(|stack| stack.push(current_cursor));
 
-                match post_json::<SearchFaceResponse>(&url, payload).await {
-                    Ok(body) => {
-                        matches.set(body.matches.clone());
-                        search_output.set(pretty_json(&body));
-                        remember_key(recent_keys, input_value("search-key"));
-                    }
-                    Err(error) => search_output.set(error),
-                }
+            load_face_images(
+                api_url,
+                collection,
+                list_status,
+                list_limit,
+                face_images,
+                face_images_output,
+                face_images_busy,
+                current_face_images_cursor,
+                next_face_images_cursor,
+                Some(cursor),
+            );
+        };
 
-                search_busy.set(false);
+        let previous_face_images_page = move |_| {
+            let previous_cursor = face_images_cursor_stack
+                .with_untracked(|stack| stack.last().cloned())
+                .flatten();
+            face_images_cursor_stack.update(|stack| {
+                stack.pop();
             });
+
+            load_face_images(
+                api_url,
+                collection,
+                list_status,
+                list_limit,
+                face_images,
+                face_images_output,
+                face_images_busy,
+                current_face_images_cursor,
+                next_face_images_cursor,
+                previous_cursor,
+            );
         };
 
         view! {
@@ -262,39 +361,6 @@ mod app {
                             on:input=move |event| collection.set(event_target_value(&event))
                             autocomplete="off"
                         />
-
-                        <div class="key-history">
-                            <div class="section-title">"Recent Keys"</div>
-                            <div class="recent-list">
-                                <Show
-                                    when=move || !recent_keys.get().is_empty()
-                                    fallback=|| view! { <p class="muted">"No keys yet"</p> }
-                                >
-                                    <For
-                                        each=move || recent_keys.get()
-                                        key=|key| key.clone()
-                                        children=move |key| {
-                                            let use_key = key.clone();
-                                            view! {
-                                                <div class="recent-key">
-                                                    <span>{key}</span>
-                                                    <button
-                                                        type="button"
-                                                        title="Use key"
-                                                        on:click=move |_| {
-                                                            set_input_value("create-key", &use_key);
-                                                            set_input_value("search-key", &use_key);
-                                                        }
-                                                    >
-                                                        "↗"
-                                                    </button>
-                                                </div>
-                                            }
-                                        }
-                                    />
-                                </Show>
-                            </div>
-                        </div>
                     </aside>
 
                     <section class="tool-grid">
@@ -418,6 +484,7 @@ mod app {
                                 <table>
                                     <thead>
                                         <tr>
+                                            <th>"Image"</th>
                                             <th>"Image Key"</th>
                                             <th>"ID"</th>
                                             <th>"Similarity"</th>
@@ -428,19 +495,34 @@ mod app {
                                             when=move || !matches.get().is_empty()
                                             fallback=|| view! {
                                                 <tr>
-                                                    <td colspan="3" class="empty">"No matches"</td>
+                                                    <td colspan="4" class="empty">"No matches"</td>
                                                 </tr>
                                             }
                                         >
                                             <For
                                                 each=move || matches.get()
                                                 key=|item| item.id.clone()
-                                                children=|item| view! {
-                                                    <tr>
-                                                        <td>{item.image_key}</td>
-                                                        <td>{item.id}</td>
-                                                        <td class="score">{format!("{:.2}%", item.similarity * 100.0)}</td>
-                                                    </tr>
+                                                children=move |item| {
+                                                    let image_key = item.image_key.clone();
+                                                    let download_url = item.download_url.clone();
+                                                    let download_url_for_visibility = download_url.clone();
+                                                    let id = item.id;
+                                                    let similarity = item.similarity;
+                                                    view! {
+                                                        <tr>
+                                                            <td>
+                                                                <img
+                                                                    class="thumb"
+                                                                    alt=""
+                                                                    src=download_url
+                                                                    class:hidden=move || download_url_for_visibility.is_empty()
+                                                                />
+                                                            </td>
+                                                            <td class="key-cell">{image_key}</td>
+                                                            <td>{id}</td>
+                                                            <td class="score">{format!("{:.2}%", similarity * 100.0)}</td>
+                                                        </tr>
+                                                    }
                                                 }
                                             />
                                         </Show>
@@ -449,10 +531,213 @@ mod app {
                             </div>
                             <pre class="output">{move || search_output.get()}</pre>
                         </article>
+
+                        <article class="panel panel-wide">
+                            <div class="panel-header">
+                                <div>
+                                    <h2>"4. Face Images"</h2>
+                                    <p>"Review stored faces and use any row as a search query."</p>
+                                </div>
+                            </div>
+                            <form class="list-form" on:submit=submit_face_images>
+                                <div>
+                                    <label for="list-status">"Status"</label>
+                                    <input
+                                        id="list-status"
+                                        type="text"
+                                        placeholder="processed"
+                                        prop:value=move || list_status.get()
+                                        on:input=move |event| list_status.set(event_target_value(&event))
+                                        disabled=move || face_images_busy.get()
+                                    />
+                                </div>
+                                <div>
+                                    <label for="list-limit">"Limit"</label>
+                                    <input
+                                        id="list-limit"
+                                        type="number"
+                                        min="1"
+                                        max="100"
+                                        prop:value=move || list_limit.get().to_string()
+                                        on:input=move |event| {
+                                            if let Ok(value) = event_target_value(&event).parse::<usize>() {
+                                                list_limit.set(value);
+                                            }
+                                        }
+                                        disabled=move || face_images_busy.get()
+                                    />
+                                </div>
+                                <button class="primary" type="submit" disabled=move || face_images_busy.get()>
+                                    "Load"
+                                </button>
+                            </form>
+
+                            <div class="results">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>"Image"</th>
+                                            <th>"Image Key"</th>
+                                            <th>"Status"</th>
+                                            <th>"Created"</th>
+                                            <th>"Actions"</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <Show
+                                            when=move || !face_images.get().is_empty()
+                                            fallback=|| view! {
+                                                <tr>
+                                                    <td colspan="5" class="empty">"No face images"</td>
+                                                </tr>
+                                            }
+                                        >
+                                            <For
+                                                each=move || face_images.get()
+                                                key=|item| item.id.clone()
+                                                children=move |item| {
+                                                    let search_key = item.image_key.clone();
+                                                    view! {
+                                                        <tr>
+                                                            <td>
+                                                                <img class="thumb" alt="" src=item.download_url.clone() />
+                                                            </td>
+                                                            <td class="key-cell">{item.image_key}</td>
+                                                            <td>{item.status}</td>
+                                                            <td>{item.created_at}</td>
+                                                            <td>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled=move || search_busy.get()
+                                                                    on:click=move |_| {
+                                                                        let image_key = search_key.clone();
+                                                                        set_input_value("search-key", &image_key);
+                                                                        run_search(
+                                                                            api_url,
+                                                                            collection,
+                                                                            search_output,
+                                                                            matches,
+                                                                            search_busy,
+                                                                            image_key,
+                                                                        );
+                                                                    }
+                                                                >
+                                                                    "Search"
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                }
+                                            />
+                                        </Show>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="pager">
+                                <button
+                                    type="button"
+                                    disabled=move || face_images_busy.get() || face_images_cursor_stack.get().is_empty()
+                                    on:click=previous_face_images_page
+                                >
+                                    "Previous"
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled=move || face_images_busy.get() || next_face_images_cursor.get().is_none()
+                                    on:click=next_face_images_page
+                                >
+                                    "Next"
+                                </button>
+                                <span class="muted">
+                                    {move || if next_face_images_cursor.get().is_some() { "More results available" } else { "End of list" }}
+                                </span>
+                            </div>
+                            <pre class="output">{move || face_images_output.get()}</pre>
+                        </article>
                     </section>
                 </section>
             </main>
         }
+    }
+
+    fn load_face_images(
+        api_url: RwSignal<String>,
+        collection: RwSignal<String>,
+        list_status: RwSignal<String>,
+        list_limit: RwSignal<usize>,
+        face_images: RwSignal<Vec<FaceImageResponse>>,
+        face_images_output: RwSignal<String>,
+        face_images_busy: RwSignal<bool>,
+        current_cursor: RwSignal<Option<ListFaceImagesCursorResponse>>,
+        next_cursor: RwSignal<Option<ListFaceImagesCursorResponse>>,
+        cursor: Option<ListFaceImagesCursorResponse>,
+    ) {
+        let url = format!("{}/api/v1/faces/list", api_base(api_url));
+        let collection_slug = collection.get_untracked();
+        let status = list_status.get_untracked();
+        let limit = list_limit.get_untracked();
+
+        face_images_busy.set(true);
+        face_images_output.set("Loading...".to_string());
+
+        spawn_local(async move {
+            let payload = serde_json::json!({
+                "collection_slug": nullable_string(collection_slug),
+                "status": nullable_string(status),
+                "limit": limit,
+                "cursor": cursor.clone(),
+            });
+
+            match post_json::<ListFaceImagesResponse>(&url, payload).await {
+                Ok(body) => {
+                    face_images.set(body.items.clone());
+                    current_cursor.set(cursor);
+                    next_cursor.set(body.next_cursor.clone());
+                    face_images_output.set(pretty_json(&body));
+                }
+                Err(error) => face_images_output.set(error),
+            }
+
+            face_images_busy.set(false);
+        });
+    }
+
+    fn run_search(
+        api_url: RwSignal<String>,
+        collection: RwSignal<String>,
+        search_output: RwSignal<String>,
+        matches: RwSignal<Vec<SearchFaceMatchResponse>>,
+        search_busy: RwSignal<bool>,
+        image_key: String,
+    ) {
+        let collection_slug = collection.get_untracked();
+        let max_faces = input_value("max-faces").parse::<usize>().unwrap_or(10);
+        let similarity_threshold = input_value("threshold").parse::<f32>().unwrap_or(80.0);
+        let url = format!("{}/api/v1/faces/search_similar", api_base(api_url));
+
+        search_busy.set(true);
+        search_output.set("Searching...".to_string());
+        matches.set(Vec::new());
+
+        spawn_local(async move {
+            let payload = serde_json::json!({
+                "image_key": image_key,
+                "collection_slug": nullable_string(collection_slug),
+                "max_faces": max_faces,
+                "similarity_threshold": similarity_threshold,
+            });
+
+            match post_json::<SearchFaceResponse>(&url, payload).await {
+                Ok(body) => {
+                    matches.set(body.matches.clone());
+                    search_output.set(pretty_json(&body));
+                }
+                Err(error) => search_output.set(error),
+            }
+
+            search_busy.set(false);
+        });
     }
 
     async fn post_json<T>(url: &str, payload: serde_json::Value) -> Result<T, String>
@@ -530,19 +815,6 @@ mod app {
         trim_trailing_slash(&api_url.get_untracked())
     }
 
-    fn remember_key(recent_keys: RwSignal<Vec<String>>, key: String) {
-        if key.trim().is_empty() {
-            return;
-        }
-
-        let mut keys = recent_keys.get_untracked();
-        keys.retain(|item| item != &key);
-        keys.insert(0, key);
-        keys.truncate(10);
-        save_recent_keys(&keys);
-        recent_keys.set(keys);
-    }
-
     fn nullable_string(value: String) -> serde_json::Value {
         let value = value.trim().to_string();
         if value.is_empty() {
@@ -582,18 +854,6 @@ mod app {
             web_sys::window().and_then(|window| window.local_storage().ok().flatten())
         {
             let _ = storage.set_item(key, value);
-        }
-    }
-
-    fn load_recent_keys() -> Vec<String> {
-        local_storage_get(RECENT_KEYS_STORAGE_KEY)
-            .and_then(|value| serde_json::from_str(&value).ok())
-            .unwrap_or_default()
-    }
-
-    fn save_recent_keys(keys: &[String]) {
-        if let Ok(value) = serde_json::to_string(keys) {
-            local_storage_set(RECENT_KEYS_STORAGE_KEY, &value);
         }
     }
 
