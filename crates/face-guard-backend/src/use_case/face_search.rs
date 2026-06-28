@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use anyhow::{Context, Result, anyhow};
 use face_guard_ml::{FaceDetector, FaceEmbeddingGenerator};
@@ -6,9 +9,7 @@ use face_guard_ml::{FaceDetector, FaceEmbeddingGenerator};
 use crate::{
     domain::{CollectionSlug, FaceImageId, FaceImageKey},
     http::error::AppHttpError,
-    repository::face_embedding::{
-        FaceEmbeddingRepository, SearchSimilarFacesQuery, SimilarFaceEmbedding,
-    },
+    repository::face_embedding::{FaceEmbeddingRepository, SearchSimilarFacesQuery},
     storage::ObjectStorage,
     validation::{validate_image_bytes, validate_upload_input},
 };
@@ -31,17 +32,8 @@ pub struct SearchSimilarFaceOutput {
 pub struct SearchSimilarFaceMatch {
     pub face_image_id: FaceImageId,
     pub image_key: FaceImageKey,
+    pub download_url: String,
     pub similarity: f32,
-}
-
-impl From<SimilarFaceEmbedding> for SearchSimilarFaceMatch {
-    fn from(value: SimilarFaceEmbedding) -> Self {
-        Self {
-            face_image_id: value.face_image_id,
-            image_key: value.image_key,
-            similarity: value.similarity,
-        }
-    }
 }
 
 pub struct SearchSimilarFaceUseCase<R>
@@ -131,12 +123,24 @@ where
             .await
             .context("failed to search similar faces")?;
 
+        let mut items = Vec::with_capacity(matches.len());
+        for item in matches {
+            let url = self
+                .s3_storage
+                .presigned_get_url(item.image_key.as_str(), Duration::from_secs(15 * 60))
+                .await?;
+
+            items.push(SearchSimilarFaceMatch {
+                face_image_id: item.face_image_id,
+                download_url: url,
+                image_key: item.image_key,
+                similarity: item.similarity,
+            });
+        }
+
         Ok(SearchSimilarFaceOutput {
             collection_slug: input.collection_slug,
-            matches: matches
-                .into_iter()
-                .map(SearchSimilarFaceMatch::from)
-                .collect(),
+            matches: items,
         })
     }
 }
@@ -152,7 +156,10 @@ mod tests {
     };
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 
-    use crate::{domain::FaceEmbeddingId, repository::face_embedding::NewFaceEmbedding};
+    use crate::{
+        domain::FaceEmbeddingId,
+        repository::face_embedding::{NewFaceEmbedding, SimilarFaceEmbedding},
+    };
 
     const TEST_IMAGE_KEY: &str = "faces/search.png";
 
@@ -166,6 +173,7 @@ mod tests {
     struct FakeStorageState {
         objects: Vec<StoredObject>,
         requested_keys: Vec<String>,
+        presigned_get_url_requests: Vec<(String, Duration)>,
         get_object_error: Option<String>,
     }
 
@@ -180,6 +188,7 @@ mod tests {
                 state: Mutex::new(FakeStorageState {
                     objects: Vec::new(),
                     requested_keys: Vec::new(),
+                    presigned_get_url_requests: Vec::new(),
                     get_object_error: Some(error.into()),
                 }),
             }
@@ -193,6 +202,7 @@ mod tests {
                         bytes,
                     }],
                     requested_keys: Vec::new(),
+                    presigned_get_url_requests: Vec::new(),
                     get_object_error: None,
                 }),
             }
@@ -200,6 +210,14 @@ mod tests {
 
         fn requested_keys(&self) -> Vec<String> {
             self.state.lock().unwrap().requested_keys.clone()
+        }
+
+        fn presigned_get_url_requests(&self) -> Vec<(String, Duration)> {
+            self.state
+                .lock()
+                .unwrap()
+                .presigned_get_url_requests
+                .clone()
         }
     }
 
@@ -225,12 +243,14 @@ mod tests {
                 .ok_or_else(|| anyhow::anyhow!("object not found: {key}"))
         }
 
-        async fn presigned_get_url(
-            &self,
-            _key: &str,
-            _expires_in: std::time::Duration,
-        ) -> Result<String> {
-            unimplemented!("face search use case does not generate presigned URLs")
+        async fn presigned_get_url(&self, key: &str, expires_in: Duration) -> Result<String> {
+            self.state
+                .lock()
+                .unwrap()
+                .presigned_get_url_requests
+                .push((key.to_string(), expires_in));
+
+            Ok(format!("https://storage.test/{key}"))
         }
     }
 
@@ -442,8 +462,25 @@ mod tests {
         assert_eq!(output.matches.len(), 2);
         assert_eq!(output.matches[0].face_image_id, matches[0].face_image_id);
         assert_eq!(output.matches[0].image_key.as_str(), "faces/match-1.png");
+        assert_eq!(
+            output.matches[0].download_url,
+            "https://storage.test/faces/match-1.png"
+        );
         assert_eq!(output.matches[0].similarity, 0.93);
         assert_eq!(storage.requested_keys(), vec![TEST_IMAGE_KEY.to_string()]);
+        assert_eq!(
+            storage.presigned_get_url_requests(),
+            vec![
+                (
+                    "faces/match-1.png".to_string(),
+                    Duration::from_secs(15 * 60)
+                ),
+                (
+                    "faces/match-2.png".to_string(),
+                    Duration::from_secs(15 * 60)
+                )
+            ]
+        );
 
         let query = repository.query().unwrap();
         assert_eq!(query.collection_slug.as_str(), "test_collection");

@@ -11,6 +11,7 @@ use crate::use_case::upload_object::UploadOgjectOutput;
 pub struct SearchFaceMatchResponse {
     pub id: String,
     pub image_key: String,
+    pub download_url: String,
     pub similarity: f32,
 }
 
@@ -24,6 +25,7 @@ impl From<SearchSimilarFaceMatch> for SearchFaceMatchResponse {
     fn from(value: SearchSimilarFaceMatch) -> Self {
         Self {
             id: value.face_image_id.to_string(),
+            download_url: value.download_url,
             image_key: value.image_key.as_str().to_string(),
             similarity: value.similarity,
         }
