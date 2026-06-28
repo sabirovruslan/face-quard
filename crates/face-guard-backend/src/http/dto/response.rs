@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use crate::use_case::create_face_image::CreateFaceImageOutput;
 use crate::use_case::face_search::{SearchSimilarFaceMatch, SearchSimilarFaceOutput};
+use crate::use_case::upload_object::UploadOgjectOutput;
 
 #[derive(Debug, Serialize)]
 pub struct SearchFaceMatchResponse {
@@ -40,12 +41,12 @@ impl From<SearchSimilarFaceOutput> for SearchFaceResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct UploadFaceImageResponse {
+pub struct CreateFaceImageResponse {
     pub id: String,
     pub status: String,
 }
 
-impl TryFrom<CreateFaceImageOutput> for UploadFaceImageResponse {
+impl TryFrom<CreateFaceImageOutput> for CreateFaceImageResponse {
     type Error = anyhow::Error;
 
     fn try_from(value: CreateFaceImageOutput) -> Result<Self, Self::Error> {
@@ -53,5 +54,18 @@ impl TryFrom<CreateFaceImageOutput> for UploadFaceImageResponse {
             id: value.face_image_id.to_string(),
             status: value.status.as_str().to_string(),
         })
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct UploadObjectResponse {
+    pub image_key: String,
+}
+
+impl From<UploadOgjectOutput> for UploadObjectResponse {
+    fn from(value: UploadOgjectOutput) -> Self {
+        Self {
+            image_key: value.image_key.as_str().to_string(),
+        }
     }
 }

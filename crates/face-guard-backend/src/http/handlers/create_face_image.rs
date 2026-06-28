@@ -4,7 +4,7 @@ use axum::{Json, extract::State};
 use crate::{
     bootstrap::server::AppState,
     http::{
-        dto::{request::CreateFaceImageRequest, response::UploadFaceImageResponse},
+        dto::{request::CreateFaceImageRequest, response::CreateFaceImageResponse},
         error::AppHttpError,
     },
     repository::PgRepository,
@@ -14,7 +14,7 @@ use crate::{
 pub async fn create_face_image(
     State(state): State<AppState>,
     Json(request): Json<CreateFaceImageRequest>,
-) -> Result<Json<UploadFaceImageResponse>, AppHttpError> {
+) -> Result<Json<CreateFaceImageResponse>, AppHttpError> {
     let input = CreateFaceImageInput {
         collection_slug: request.collection_slug()?,
         image_key: request.image_key()?,
@@ -28,7 +28,7 @@ pub async fn create_face_image(
     );
 
     let output = use_case.execute(input).await?;
-    let response = UploadFaceImageResponse::try_from(output)?;
+    let response = CreateFaceImageResponse::try_from(output)?;
 
     Ok(Json(response))
 }
